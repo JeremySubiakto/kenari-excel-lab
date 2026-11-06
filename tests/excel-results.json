@@ -1,0 +1,291 @@
+{
+"sum": [
+"76"
+],
+"sumifs": [
+"25"
+],
+"sumifs-gt": [
+"57"
+],
+"sumifs-wild": [
+"45"
+],
+"sumifs-case": [
+"44"
+],
+"countifs": [
+"3"
+],
+"averageifs": [
+"1350"
+],
+"maxifs": [
+"5"
+],
+"vlookup": [
+"1500"
+],
+"vlookup-na": [
+"#N/A"
+],
+"index-match": [
+"4500"
+],
+"xlookup": [
+"1500"
+],
+"xlookup-nf": [
+"none"
+],
+"xlookup-last": [
+"15"
+],
+"xlookup-next": [
+"b"
+],
+"xlookup-spillrow": [
+"Coffee",
+"5",
+"1500"
+],
+"xmatch": [
+"5"
+],
+"filter": [
+"Kopi Susu",
+"Sabun Sereh",
+"#N/A"
+],
+"filter-2d": [
+"Sumatera",
+"Mie Soto",
+"Jawa",
+"Kopi Hitam",
+"Jawa",
+"Mie Goreng",
+"#N/A",
+"#N/A"
+],
+"filter-and": [
+"Kopi Hitam",
+"Mie Goreng",
+"#N/A",
+"#N/A"
+],
+"filter-empty": [
+"nothing"
+],
+"filter-noempty": [
+"#CALC!"
+],
+"unique": [
+"Jawa",
+"Bali",
+"Sumatera",
+"#N/A"
+],
+"unique-once": [
+"Kopi Susu",
+"Mie Soto",
+"Sabun Sereh",
+"Kopi Hitam",
+"#N/A",
+"#N/A",
+"#N/A"
+],
+"sort": [
+"3",
+"4",
+"5",
+"7",
+"10",
+"12",
+"15",
+"20"
+],
+"sort-desc": [
+"Sumatera",
+"Mie Soto",
+"Noodle",
+"20",
+"Jawa",
+"Mie Goreng",
+"Noodle",
+"15"
+],
+"sortby": [
+"Mie Soto",
+"Mie Goreng",
+"Kopi Hitam"
+],
+"sort-unique": [
+"Coffee",
+"Noodle",
+"Sambal",
+"Soap",
+"#N/A"
+],
+"let": [
+"382850"
+],
+"let-spill": [
+"Bali",
+"Jawa",
+"Sumatera",
+"#N/A"
+],
+"spill-math": [
+"20",
+"10",
+"14"
+],
+"spill-ref": [
+"76"
+],
+"sumproduct": [
+"304400"
+],
+"sum-array": [
+"304400"
+],
+"sequence": [
+"1",
+"2",
+"3"
+],
+"textjoin": [
+"Jawa, Bali, Sumatera"
+],
+"textsplit": [
+"a",
+"b",
+"c"
+],
+"textbefore": [
+"Mie"
+],
+"vstack": [
+"1",
+"2"
+],
+"take": [
+"20",
+"15"
+],
+"lambda": [
+"42"
+],
+"map": [
+"11",
+"6"
+],
+"byrow": [
+"3010",
+"1505"
+],
+"groupby": [
+"Bali",
+"8",
+"Jawa",
+"44",
+"Sumatera",
+"24"
+],
+"text-num": [
+"1234567,50"
+],
+"text-date": [
+"01 Jan 2026"
+],
+"text-pct": [
+"26%"
+],
+"eomonth": [
+"46081"
+],
+"edate": [
+"46113"
+],
+"datedif": [
+"37"
+],
+"networkdays": [
+"27"
+],
+"weekday": [
+"4"
+],
+"date": [
+"46023"
+],
+"pmt": [
+"470734,72"
+],
+"ipmt": [
+"100000"
+],
+"npv": [
+"481,5928"
+],
+"irr": [
+"0,088963"
+],
+"round": [
+"3|-3|2"
+],
+"float-eq": [
+"TRUE"
+],
+"div0": [
+"#DIV/0!"
+],
+"value-err": [
+"#VALUE!"
+],
+"iferror": [
+"oops"
+],
+"ifna": [
+"none"
+],
+"ifs": [
+"b"
+],
+"switch": [
+"2"
+],
+"proper": [
+"Mie Gorengabb3"
+],
+"subst": [
+"a+b+c"
+],
+"text-compare": [
+"TRUE"
+],
+"coerce": [
+"2"
+],
+"blank-eq": [
+"TRUE"
+],
+"countblank": [
+"1"
+],
+"subtotal": [
+"76"
+],
+"aggregate": [
+"76"
+],
+"offset": [
+"22"
+],
+"indirect": [
+"5"
+],
+"choose": [
+"y"
+]
+}
