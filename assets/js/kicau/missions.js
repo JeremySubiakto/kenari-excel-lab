@@ -1735,6 +1735,682 @@
     note: { fn: 'The early-warning report', what: 'Sales from one company, days late from another, one rule, one formula.', shape: '=IF(AND(C5/B5-1<-0.1,E5>30),"WARNING","OK")' }
   }), { kind: 'excel', final: true }));
 
+  /* ---------- Chapter 11: Real cases, across workbooks ----------
+     Year-end at Rasa Kenari and Bank Kenari. Real work arrives in more than one file: the sales lines, the
+     product master, the targets, the bank's loan book and the shipping rate card are separate workbooks, and a
+     formula reaches into the others as Excel writes it: [master_produk.xlsx]Produk!$A$5:$D$16.
+     Each sheet below has a base version and a next-day version. A request picks its own sheet (`main`, where
+     the answer goes) and the other workbooks it has open (`open`). The engine gets the other sheets through
+     the SHEETS key; the app draws a tab for every open workbook and sheet. */
+  const SHEETS = Symbol.for('kenari.sheets'), MAIN = Symbol.for('kenari.main');
+  const DB = D.build();
+  const quote = (name) => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : "'" + name.replace(/'/g, "''") + "'");
+  /** How a formula in `fromBook` names a range on another sheet, the way Excel writes it. */
+  const sheetRef = (fromBook, book, sheet) => (book === fromBook ? quote(sheet) + '!' : (/[^A-Za-z0-9_.]/.test(book + sheet) ? "'[" + book + ']' + sheet + "'!" : '[' + book + ']' + sheet + '!'));
+  const engineName = (mainBook, book, sheet) => (book === mainBook ? sheet : book + '|' + sheet);
+
+  const DIST11 = DB.distributors.map((d) => d.name);
+  const REGIONS = ['Jabodetabek', 'Jawa Barat', 'Jawa Tengah', 'Jawa Timur', 'Bali Nusra', 'Sumatera', 'Sulawesi'];
+  const REPS = ['Rudi', 'Wulan', 'Agus', 'Sinta'];
+  /* Q4 achievement per distributor (net ÷ target). Exactly 1.2, 1 and 0.8 sit on the tier edges on purpose. */
+  const ACH = [1.32, 1.2, 1.08, 1, 0.95, 0.86, 0.8, 0.74, 0.6, 1.15, 0.9, 1.02, 0.79, 1.25];
+  const TARGET = [180, 150, 120, 140, 100, 90, 110, 80, 75, 160, 95, 130, 70, 105].map((m) => m * 1000000);
+
+  const SHEET11 = {
+    /* Product master: one row per SKU, and the category discounts on a second sheet. */
+    Produk: { book: 'master_produk.xlsx', cols: ['A', 'B', 'C', 'D'], num: ['D'], first: 5, last: 16, build: (alt) => {
+      const c = { A4: 'SKU', B4: 'Product', C4: 'Category', D4: 'Carton price (Rp)' };
+      D.PRODUCTS.forEach((p, i) => { const n = 5 + i; c['A' + n] = p.sku; c['B' + n] = p.name; c['C' + n] = p.category; c['D' + n] = p.carton_price + (alt && i % 4 === 1 ? 6000 : 0); });
+      return c;
+    } },
+    Diskon: { book: 'master_produk.xlsx', cols: ['A', 'B'], num: ['B'], first: 5, last: 8, build: (alt) => {
+      const c = { A4: 'Category', B4: 'Discount %' };
+      [['Noodles', 2], ['Coffee', alt ? 4 : 3], ['Sambal', alt ? 1 : 0], ['Soap', 5]].forEach(([k, v], i) => { c['A' + (5 + i)] = k; c['B' + (5 + i)] = v; });
+      return c;
+    } },
+    /* Q4 targets by distributor, with the area and the sales rep. */
+    Target: { book: 'target_2026.xlsx', cols: ['A', 'B', 'C', 'D'], num: ['D'], first: 5, last: 18, build: (alt) => {
+      const c = { A4: 'Distributor', B4: 'Area', C4: 'Sales rep', D4: 'Q4 target (Rp)' };
+      DB.distributors.forEach((d, i) => { const n = 5 + i; c['A' + n] = d.name; c['B' + n] = d.region; c['C' + n] = REPS[i % 4]; c['D' + n] = TARGET[i] + (alt && i === 4 ? 10000000 : 0); });
+      return c;
+    } },
+    /* Q4 net sales per distributor, the summary everyone works from. */
+    Ringkasan: { book: 'ringkasan_q4.xlsx', cols: ['A', 'B', 'C'], num: ['B'], first: 5, last: 18, build: (alt) => {
+      const c = { A4: 'Distributor', B4: 'Net Q4 (Rp)' };
+      DB.distributors.forEach((d, i) => { const n = 5 + i; c['A' + n] = d.name; c['B' + n] = Math.round(TARGET[i] * ACH[i]) + (alt && i === 2 ? 15000000 : 0) - (alt && i === 7 ? 6000000 : 0); });
+      return c;
+    } },
+    /* Bank Kenari's loan book, one facility per distributor. */
+    Pinjaman: { book: 'buku_pinjaman.xlsx', cols: ['A', 'B', 'C', 'D', 'E', 'F', 'G'], num: ['C', 'D', 'E'], first: 5, last: 18, build: (alt) => {
+      const c = { A4: 'Facility', B4: 'Distributor', C4: 'Limit (Rp)', D4: 'Outstanding (Rp)', E4: 'Days late', F4: 'Restructured', G4: 'Region' };
+      const DPD = [0, 0, 45, 0, 95, 15, 130, 0, 200, 0, 75, 0, 35, 150];
+      const RES = ['N', 'N', 'N', 'Y', 'N', 'N', 'Y', 'N', 'N', 'N', 'Y', 'N', 'N', 'Y'];
+      const USE = [0.66, 0.46, 0.92, 0.55, 0.97, 0.71, 0.88, 0.3, 0.99, 0.62, 0.81, 0.97, 0.58, 0.9];
+      DB.distributors.forEach((d, i) => {
+        const n = 5 + i, f = DB.facilities.find((x) => x.distributor === d.name);
+        const limit = f ? f.limit : 75000000;
+        c['A' + n] = 'F' + String(101 + i); c['B' + n] = d.name; c['C' + n] = limit; c['D' + n] = Math.round(limit * USE[i] / 100000) * 100000;
+        c['E' + n] = DPD[i] + (alt && i === 5 ? 50 : 0) + (alt && i === 0 ? 31 : 0); c['F' + n] = RES[i]; c['G' + n] = d.region;
+      });
+      return c;
+    } },
+    /* Shipping rate card: rupiah per carton, by region down and category across. */
+    Tarif: { book: 'tarif_kirim.xlsx', cols: ['A', 'B', 'C', 'D', 'E'], num: ['B', 'C', 'D', 'E'], first: 5, last: 11, build: (alt) => {
+      const c = { A4: 'Region', B4: 'Noodles', C4: 'Coffee', D4: 'Sambal', E4: 'Soap' };
+      const base = [1500, 2000, 2500, 2500, 4500, 5000, 6500];
+      REGIONS.forEach((r, i) => { const n = 5 + i; c['A' + n] = r; ['B', 'C', 'D', 'E'].forEach((col, k) => { c[col + n] = base[i] + k * 500 + (alt && i >= 5 ? 750 : 0); }); });
+      return c;
+    } },
+    /* Q4 sales lines: date, distributor, SKU, cartons. */
+    Penjualan: { book: 'penjualan_q4.xlsx', cols: ['A', 'B', 'C', 'D', 'E'], num: ['D'], dateCols: ['A'], first: 5, last: 22, build: (alt) => {
+      const c = { A4: 'Date', B4: 'Distributor', C4: 'SKU', D4: 'Cartons' };
+      const picks = [];
+      for (let i = 0; picks.length < 18; i += 7) { const sale = DB.sales[(i * 3) % DB.sales.length]; if (!picks.some((x) => x.invoice === sale.invoice)) picks.push(sale); }
+      picks.sort((a, b) => ((+a.date.slice(5, 7) - 5) % 3 * 100 + +a.date.slice(8, 10)) - ((+b.date.slice(5, 7) - 5) % 3 * 100 + +b.date.slice(8, 10)));
+      picks.forEach((sale, i) => { const n = 5 + i; c['A' + n] = D.toSerial('2026-' + String(10 + ((+sale.date.slice(5, 7) - 5) % 3)) + '-' + sale.date.slice(8, 10)); c['B' + n] = sale.distributor; c['C' + n] = sale.sku; c['D' + n] = sale.cartons; });
+      if (alt) { c.C7 = c.C7 === 'SRW-SER' ? 'MLK-GOR' : 'SRW-SER'; c.D9 += 12; c.C14 = c.C14 === 'KSJ-ARE' ? 'SNY-IJO' : 'KSJ-ARE'; }
+      return c;
+    } },
+    /* Bank Kenari's late-fee rules, a second sheet in the loan book's workbook. */
+    Aturan: { book: 'buku_pinjaman.xlsx', cols: ['A', 'B'], num: ['B'], first: 5, last: 7, build: (alt) => {
+      return { A4: 'Rule', B4: 'Value', A5: 'Grace days', B5: alt ? 5 : 7, A6: 'Fee per day late (%)', B6: 0.1, A7: 'Fee cap (Rp)', B7: alt ? 4000000 : 5000000 };
+    } },
+    /* A blank memo: the inputs go in rows 1 to 2 and the answer in B3 or below. */
+    Memo: { book: 'memo_risiko.xlsx', cols: ['A', 'B', 'C', 'D'], num: [], first: 5, last: 5, build: () => ({}) },
+    /* Orders waiting for credit approval. */
+    Order: { book: 'persetujuan_order.xlsx', cols: ['A', 'B', 'C'], num: ['B'], first: 5, last: 14, build: (alt) => {
+      const c = { A4: 'Distributor', B4: 'Order value (Rp)' };
+      [0, 1, 2, 3, 4, 5, 7, 9, 11, 12].forEach((di, i) => { c['A' + (5 + i)] = DB.distributors[di].name; c['B' + (5 + i)] = [12, 8, 4, 30, 6, 9, 15, 20, 2, 11][i] * 1000000 + (alt && i === 1 ? 25000000 : 0); });
+      return c;
+    } }
+  };
+
+  /** Where a sheet's data starts and ends, as an absolute range Excel would write from `fromBook`. */
+  const range11 = (fromBook, name, col) => { const S = SHEET11[name]; return sheetRef(fromBook, S.book, name) + '$' + col + '$' + S.first + ':$' + col + '$' + S.last; };
+  const table11 = (fromBook, name, c1, c2) => { const S = SHEET11[name]; return sheetRef(fromBook, S.book, name) + '$' + c1 + '$' + S.first + ':$' + c2 + '$' + S.last; };
+
+  /**
+   * A Chapter 11 request. `main` is the sheet the answer goes on, `open` the other sheets it can see.
+   * `ansLabel` makes it a column request, typed in the first row and filled down; otherwise the answer is a
+   * single cell (`answerCell`, default B2) with `top` filling rows 1 to 3.
+   */
+  function real(o) {
+    const M = SHEET11[o.main];
+    const top = typeof o.top === 'function' ? o.top : () => (o.top || {});
+    const ansCol = o.ansCol || M.cols[M.cols.length - 1];
+    const fill = o.ansLabel ? { col: ansCol, first: M.first, last: M.last } : null;
+    const mainCols = fill && !M.cols.includes(ansCol) ? M.cols.concat(ansCol) : (o.cols || M.cols);
+    const make = (v) => {
+      const c = Object.assign(M.build(v === 'alt'), top(v));
+      if (o.ansLabel) c[ansCol + '4'] = o.ansLabel;
+      if (o.edit) o.edit(c, v);
+      c[MAIN] = o.main;
+      c[SHEETS] = (o.open || []).map((name) => { const S = SHEET11[name]; const sc = S.build(v === 'alt'); if (o.editOpen) o.editOpen(name, sc, v); return { name: engineName(M.book, S.book, name), cells: sc }; });
+      return c;
+    };
+    const base = make('base'), alt = make('alt');
+    const books = [];
+    for (const name of [o.main].concat(o.open || [])) {
+      const S = SHEET11[name];
+      let b = books.find((x) => x.file === S.book);
+      if (!b) { b = { file: S.book, sheets: [] }; books.push(b); }
+      b.sheets.push({ name, cols: name === o.main ? mainCols : S.cols, num: S.num, dateCols: S.dateCols || [], first: S.first, last: S.last, prefix: sheetRef(M.book, S.book, name), main: name === o.main });
+    }
+    const cols = mainCols;
+    return formula(Object.assign({
+      chapter: 11, file: M.book, sheetName: o.main, books, cols, num: M.num, dateCols: M.dateCols || [], first: M.first, last: M.last,
+      fill, answerCell: fill ? fill.col + M.first : (o.answerCell || 'B2'),
+      colRange: Object.fromEntries(M.cols.map((c) => [c, c + M.first + ':' + c + M.last])),
+      variantCells: { base, alt }, cells: base
+    }, o, { top: undefined, main: undefined, open: undefined, edit: undefined, editOpen: undefined }));
+  }
+
+  const PROD = (fromBook) => table11(fromBook, 'Produk', 'A', 'D');
+  LIST.push(
+    real({
+      id: '11.1', from: 'bayu', due: '08:30', title: 'Prices from another workbook', main: 'Penjualan', open: ['Produk'], ansLabel: 'Value (Rp)',
+      intro: ['Pagi {name} 👷 Year-end, so everything comes in separate files now.', 'The Q4 sales lines are in <b>penjualan_q4.xlsx</b>, and the carton prices live in <b>master_produk.xlsx</b>. Both are open.', '@file', 'Column E: what is each line worth? Cartons × the carton price from the product master.'],
+      ask: 'Cartons × the carton price from master_produk.xlsx, every line, in column E.',
+      lesson: {
+        idea: 'A formula can read another open workbook. Excel writes the file name in square brackets.',
+        teach: '<p>Start the formula in this file, then tap the other workbook\'s tab and pick the range. Excel writes it as <code>[master_produk.xlsx]Produk!$A$5:$D$16</code>: the file, the sheet, then the cells, already pinned with $.</p><p>If the other file is closed, Excel adds its folder too. The formula still works, and Excel asks to update the link when you open the file.</p>',
+        ex: [['=VLOOKUP("KSJ-ARE",', 'Look for this SKU'], [PROD('penjualan_q4.xlsx') + ',', 'in the product master, another workbook,'], ['4,', 'bring back column 4, the carton price,'], ['FALSE)', 'exact match only.']],
+        exFormula: '=VLOOKUP("KSJ-ARE",' + PROD('penjualan_q4.xlsx') + ',4,FALSE)', exLabel: 'rupiah per carton of Kopi Sekejap Gula Aren',
+        bridge: 'Like a journal that takes its prices from a separate price list file instead of copying them in.'
+      },
+      starter: '=D5*VLOOKUP(', fnKey: 'VLOOKUP(', chips: ['D5*', 'C5', PROD('penjualan_q4.xlsx'), ',4', ',FALSE)'],
+      solution: '=D5*VLOOKUP(C5,' + PROD('penjualan_q4.xlsx') + ',4,FALSE)',
+      alts: ['=VLOOKUP(C5,' + PROD('penjualan_q4.xlsx') + ',4,FALSE)*D5', '=D5*XLOOKUP(C5,' + range11('penjualan_q4.xlsx', 'Produk', 'A') + ',' + range11('penjualan_q4.xlsx', 'Produk', 'D') + ')', '=D5*INDEX(' + range11('penjualan_q4.xlsx', 'Produk', 'D') + ',MATCH(C5,' + range11('penjualan_q4.xlsx', 'Produk', 'A') + ',0))'],
+      traps: [
+        { code: 'price', formula: '=VLOOKUP(C5,' + PROD('penjualan_q4.xlsx') + ',4,FALSE)', title: 'That is the price of one carton', plain: 'Multiply the carton price by the cartons in D5.', reply: 'Rp {value} for the whole line? That is one carton 😄 Times the <b>cartons</b> in column D please.' },
+        { code: 'col', formula: '=D5*VLOOKUP(C5,' + PROD('penjualan_q4.xlsx') + ',3,FALSE)', title: 'Column 3 is the category', plain: 'Count the columns of the product master from A: SKU 1, Product 2, Category 3, Carton price 4.', reply: 'Hmm, #VALUE! everywhere. Column 3 of the master is the <b>category</b>, a word. The price is column <b>4</b>.' },
+        { code: 'nodollar', formula: '=D5*VLOOKUP(C5,[master_produk.xlsx]Produk!A5:D16,4,FALSE)', title: 'The product master slid down', plain: 'Copied down, A5:D16 became A6:D17 and so on, and the first products fell out of the table. Keep the $ Excel adds: $A$5:$D$16.', reply: 'Some lines say #N/A further down 😅 When you copy it, the range in the other file slides too. Keep the <b>$</b>.' }
+      ],
+      replies: { pass: ['Mantap! Every line valued, straight from the master file 💰', 'When marketing changes a price, I only fix it in one place now.'], frozen: 'Marketing updated three prices in the master this morning and your values stayed the same.', typed: 'Typed values will not follow the master file 🙏' },
+      note: { fn: 'Another workbook', what: 'Refer to an open workbook by tapping it. Excel writes [file.xlsx]Sheet!$A$1, pinned with $.', shape: '=D5*VLOOKUP(C5,[master_produk.xlsx]Produk!$A$5:$D$16,4,FALSE)' },
+      hints: ['Cartons in D5 times the carton price of the SKU in C5. The price is in the other workbook.', 'Tap the master_produk.xlsx tab: the table is $A$5:$D$16 and the price is its 4th column.', 'It looks like =D5*VLOOKUP(C5,[master_produk.xlsx]Produk!$A$5:$D$16,4,FALSE).']
+    })
+  );
+  /* Requests 11.2 to 11.10: each written, then solved blind and checked by a second reviewer against Excel. */
+  LIST.push(
+    (() => {
+      const P = PROD('penjualan_q4.xlsx');
+      const DK = table11('penjualan_q4.xlsx', 'Diskon', 'A', 'B');
+      const PA = range11('penjualan_q4.xlsx', 'Produk', 'A'), PC = range11('penjualan_q4.xlsx', 'Produk', 'C'), PD = range11('penjualan_q4.xlsx', 'Produk', 'D');
+      const DA = range11('penjualan_q4.xlsx', 'Diskon', 'A'), DBC = range11('penjualan_q4.xlsx', 'Diskon', 'B');
+      const PRICE = 'VLOOKUP(C5,' + P + ',4,FALSE)';
+      const CAT = 'VLOOKUP(C5,' + P + ',3,FALSE)';
+      const DISC = 'VLOOKUP(' + CAT + ',' + DK + ',2,FALSE)';
+      const SOL = '=D5*' + PRICE + '*(1-' + DISC + '/100)';
+      return real({
+        id: '11.2', from: 'tika', due: '09:15', title: 'Net after the category discount', main: 'Penjualan', open: ['Produk', 'Diskon'], ansLabel: 'Net (Rp)',
+        intro: [
+          'Pagi {name}! 🙏 Tika here, closing Q4 sales.',
+          'Cartons × carton price is only the gross. My report needs the <b>net</b>, after the category discount.',
+          'The discounts are on the <b>Diskon</b> sheet of master_produk.xlsx, one row per category. A 3 there means 3%.',
+          '@file',
+          'The sales lines only have a SKU. On <b>Produk</b>, the SKU gives the category (3rd column) and the carton price (4th). On <b>Diskon</b>, the category gives the discount (2nd column).',
+          'Column E, every line: <b>cartons × carton price × (1 − discount % ÷ 100)</b> 😊'
+        ],
+        ask: 'Net (Rp) = cartons × carton price × (1 − the category\'s discount % ÷ 100), every line, in column E.',
+        lesson: {
+          idea: 'A lookup can feed another lookup: the answer of the first one is what the second one looks for.',
+          teach: '<p>A sales line only knows its SKU. <code>VLOOKUP(C5,' + P + ',3,FALSE)</code> turns the SKU into its category.</p>' +
+            '<p>Put that whole lookup where the second VLOOKUP expects the value to find: <code>VLOOKUP(VLOOKUP(C5,…,3,FALSE),' + DK + ',2,FALSE)</code>. Excel works from the inside out: SKU to category, category to discount.</p>' +
+            '<p>Diskon stores 3 for 3%, so divide by 100. Keep the brackets so the discount comes off the whole line: <code>D5*price*(1-discount/100)</code>.</p>',
+          ex: [['=VLOOKUP(', 'Look for'], ['VLOOKUP("KSJ-ARE",' + P + ',3,FALSE),', 'the category of this SKU,'], [DK + ',', 'in the discount table,'], ['2,FALSE)', 'and bring back column 2, the discount %.']],
+          exFormula: '=VLOOKUP(VLOOKUP("KSJ-ARE",' + P + ',3,FALSE),' + DK + ',2,FALSE)', exLabel: '% discount on Kopi Sekejap Gula Aren, a Coffee',
+          bridge: 'Like a two-step mapping in the ledger: the item code gives the product group, and the group gives its trade discount rate.'
+        },
+        starter: '=D5*VLOOKUP(', fnKey: 'VLOOKUP(', chips: ['D5*', 'C5', P, ',4', ',3', ',FALSE)', '*(1-', DK, ',2', '/100)'],
+        solution: SOL,
+        alts: [
+          '=' + PRICE + '*D5*(1-' + DISC + '/100)',
+          '=D5*' + PRICE + '*(100-' + DISC + ')/100',
+          '=D5*VLOOKUP(C5,' + P + ',4,0)*(1-VLOOKUP(VLOOKUP(C5,' + P + ',3,0),' + DK + ',2,0)/100)',
+          '=D5*XLOOKUP(C5,' + PA + ',' + PD + ')*(1-XLOOKUP(XLOOKUP(C5,' + PA + ',' + PC + '),' + DA + ',' + DBC + ')/100)',
+          '=D5*INDEX(' + PD + ',MATCH(C5,' + PA + ',0))*(1-INDEX(' + DBC + ',MATCH(INDEX(' + PC + ',MATCH(C5,' + PA + ',0)),' + DA + ',0))/100)',
+          '=LET(price,' + PRICE + ',cat,' + CAT + ',disc,VLOOKUP(cat,' + DK + ',2,FALSE),D5*price*(1-disc/100))'
+        ],
+        traps: [
+          { code: 'nodiv', formula: '=D5*' + PRICE + '*(1-' + DISC + ')', title: 'The % was not divided by 100', plain: 'Diskon stores 3 for 3%. 1 − 3 is −2, so the lines turn negative. Divide the discount by 100 first: (1-…/100).', reply: 'Rp {value}? A minus? 😅 The Diskon sheet says <b>3</b> for 3%, so it needs <b>÷ 100</b> before you take it off.' },
+          { code: 'gross', formula: '=D5*' + PRICE, title: 'That is the gross, before the discount', plain: 'Cartons × carton price is the gross. Take the category discount off: ×(1 − discount % ÷ 100).', reply: 'Rp {value} is the gross 😊 Net means <b>after</b> the category discount from the Diskon sheet.' },
+          { code: 'sku', formula: '=D5*' + PRICE + '*(1-VLOOKUP(C5,' + DK + ',2,FALSE)/100)', title: 'Diskon found no match', plain: 'Diskon lists categories (Noodles, Coffee, Sambal, Soap), not SKU codes. Find the category first with VLOOKUP(C5,…,3,FALSE), then look that up in Diskon. End every VLOOKUP with FALSE so it matches exactly.', reply: '#N/A 😬 The Diskon sheet only knows <b>categories</b> like Coffee, not SKU codes. Is the category coming from Produk first?' },
+          { code: 'brackets', formula: '=D5*' + PRICE + '*1-' + DISC + '/100', title: 'The brackets went missing', plain: 'Without brackets, Excel multiplies first and then subtracts the discount ÷ 100, a few hundredths of a rupiah, from the total. Wrap it: *(1-…/100).', reply: 'Rp {value}, the gross minus a few hundredths of a rupiah? 🤔 Put <b>(1 − discount ÷ 100)</b> in brackets so the whole line gets the discount.' }
+        ],
+        replies: { pass: ['Mantap! The first line nets Rp {value} after the 3% Coffee discount 💰', 'When marketing moves a discount in the master, my net moves with it. Makasih! 🙏'], frozen: 'Marketing moved Coffee to 4% and Sambal to 1% this morning, and your net did not follow 🤔', typed: 'Typed values will not follow the discounts 🙏' },
+        note: { fn: 'Lookup inside a lookup', what: 'The inner VLOOKUP turns the SKU into a category. The outer one turns the category into its discount.', shape: SOL },
+        hints: [
+          'Three things multiply: the cartons, the carton price, and (1 − discount ÷ 100). The discount needs the category first.',
+          'The price is VLOOKUP(C5,' + P + ',4,FALSE) and the category is the same lookup with 3. Look the category up in ' + DK + ', column 2, then ÷ 100.',
+          'It looks like ' + SOL + '.'
+        ]
+      });
+    })(),
+    (() => {
+      const BK = 'penjualan_q4.xlsx';
+      const T = table11(BK, 'Pinjaman', 'A', 'B');
+      const T7 = table11(BK, 'Pinjaman', 'A', 'G');
+      const FA = range11(BK, 'Pinjaman', 'A'), FB = range11(BK, 'Pinjaman', 'B');
+      const LOOK = 'VLOOKUP(B1,' + T + ',2,FALSE)';
+      return real({
+        id: '11.3', from: 'citra', due: '10:15', title: 'A borrower\'s real sales', main: 'Penjualan', open: ['Pinjaman'],
+        top: (v) => ({ A1: 'Facility', B1: v === 'alt' ? 'F114' : 'F111', A2: 'Cartons in Q4' }),
+        /* Next day only: line 5 is rebooked to UD Kedasi Prima, the F114 borrower, so its lines sit on row 5 and row 22. A range that drops the first or last row then misses cartons. */
+        edit: (c, v) => { if (v === 'alt') c.B5 = 'UD Kedasi Prima'; },
+        intro: [
+          'Pagi {name}! Annual review season at the bank 🏦',
+          'Before we renew a facility, I check that the borrower really sells.',
+          'Rasa Kenari shared their Q4 sales lines, <b>penjualan_q4.xlsx</b>. Our loan book, <b>buku_pinjaman.xlsx</b>, is open too.',
+          '@file',
+          'I type a facility number in <b>B1</b>. The sales lines only know distributor names, so the loan book tells you who owns that facility.',
+          'In <b>B2</b>: the total <b>cartons</b> in the sales lines for that distributor. One formula, so I can change B1 and read the next borrower.'
+        ],
+        ask: 'Total cartons in the sales lines for the distributor that owns the facility in B1, in <b>B2</b>.',
+        lesson: {
+          idea: 'The criteria of a SUMIF can be another formula. A VLOOKUP turns the facility number into the name SUMIF needs.',
+          teach: '<p><code>SUMIF(B5:B22, name, D5:D22)</code> adds the cartons on the rows where column B shows that name. Typed in, the name answers one borrower only.</p><p>Now put a lookup where the name goes: <code>=SUMIF(names, VLOOKUP(…), cartons)</code>. The VLOOKUP reads the facility in B1 and brings back column 2 of the loan book, the distributor. Excel works from the inside out: first the VLOOKUP finds the name, then SUMIF adds the cartons for it.</p>',
+          ex: [['=SUMIF(B5:B22,', 'In the distributor column of the sales lines,'], ['"UD Kedasi Prima",', 'find this name,'], ['D5:D22)', 'and add the cartons on those rows.']],
+          exFormula: '=SUMIF(B5:B22,"UD Kedasi Prima",D5:D22)', exLabel: 'cartons for UD Kedasi Prima, with the name typed in',
+          bridge: 'Like tracing a loan account number to the customer name, then footing that customer in the sales subledger.'
+        },
+        starter: '=SUMIF(', fnKey: 'SUMIF(', chips: ['B5:B22,', 'VLOOKUP(B1,', T, ',2,FALSE)', ',D5:D22)'],
+        solution: '=SUMIF(B5:B22,' + LOOK + ',D5:D22)',
+        alts: [
+          '=SUMIF($B$5:$B$22,VLOOKUP($B$1,' + T7 + ',2,FALSE),$D$5:$D$22)',
+          '=SUMIFS(D5:D22,B5:B22,' + LOOK + ')',
+          '=SUMIF(B5:B22,XLOOKUP(B1,' + FA + ',' + FB + '),D5:D22)',
+          '=SUMIF(B5:B22,INDEX(' + FB + ',MATCH(B1,' + FA + ',0)),D5:D22)',
+          '=LET(owner,' + LOOK + ',SUMIF(B5:B22,owner,D5:D22))',
+          '=SUMPRODUCT((B5:B22=' + LOOK + ')*D5:D22)',
+          '=SUM(FILTER(D5:D22,B5:B22=' + LOOK + '))'
+        ],
+        frozenTry: '=SUMIF(B5:B22,"CV Bangau Sejahtera",D5:D22)',
+        traps: [
+          { code: 'col', formula: '=SUMIF(B5:B22,VLOOKUP(B1,' + T7 + ',3,FALSE),D5:D22)', title: 'SUMIF found nothing to add', plain: 'A total of 0 means no line matched, or nothing was added. The criteria has to be a distributor name: in the loan book, Facility is column 1 and Distributor is column 2. Then check the order: names B5:B22 first, cartons D5:D22 last.', reply: '{value} cartons? I nearly called their director 😅 Check two things. The criteria is a distributor <b>name</b>, column <b>2</b> of the loan book. And the cartons, <b>D5:D22</b>, go last.' },
+          { code: 'dates', formula: '=SUMIF(B5:B22,' + LOOK + ',A5:A22)', title: 'Those are dates added up', plain: 'The third part of SUMIF is what gets added. Column A holds the dates. The cartons are in D5:D22.', reply: '{value} cartons? Their warehouse is not that big 😄 You added the <b>dates</b> in column A. Cartons are column <b>D</b>.' },
+          { code: 'count', formula: '=COUNTIF(B5:B22,' + LOOK + ')', title: 'That counts the lines', plain: 'COUNTIF counts how many sales lines match. Citra needs the cartons on those lines added up: SUMIF, with D5:D22 as the third part.', reply: '{value} cartons for a whole quarter? 😅 That is how many <b>sales lines</b> they had. I need the <b>cartons</b> on those lines, added up.' },
+          { code: 'name', formula: '=' + LOOK, title: 'That is the borrower, not the cartons', plain: 'This VLOOKUP finds who owns the facility, which is the first step. Now use it as the criteria of a SUMIF that adds their cartons.', reply: 'Yes, {value} owns F111 👍 That is half of it. Now I need their <b>cartons</b> added up, with this name as the SUMIF criteria.' }
+        ],
+        replies: {
+          pass: ['Restructured, 75 days late, and still {value} cartons in Q4. They sell. The problem is cash, not demand 🏦', 'Now I type any facility in B1 and the answer follows. Terima kasih.'],
+          frozen: 'I put F114 in B1 and got the wrong total 🤔 A typed name works for one borrower only. Let a VLOOKUP read B1, and add up every sales line, rows 5 to 22.',
+          typed: 'A typed total is right for one borrower only 🙏 I need a formula that reads B1.'
+        },
+        note: { fn: 'SUMIF with a lookup inside', what: 'VLOOKUP turns a code into a name, and SUMIF adds the rows for that name. Excel works from the inside out.', shape: '=SUMIF(B5:B22,VLOOKUP(B1,[buku_pinjaman.xlsx]Pinjaman!$A$5:$B$18,2,FALSE),D5:D22)' },
+        hints: [
+          'Two steps in one formula: find the distributor that owns the facility in B1, then add their cartons.',
+          'The name comes from VLOOKUP(B1,[buku_pinjaman.xlsx]Pinjaman!$A$5:$B$18,2,FALSE). Use it as the criteria of a SUMIF over B5:B22 that adds D5:D22.',
+          'It looks like =SUMIF(B5:B22,VLOOKUP(B1,[buku_pinjaman.xlsx]Pinjaman!$A$5:$B$18,2,FALSE),D5:D22).'
+        ]
+      });
+    })(),
+    (() => {
+      const BOOK = 'ringkasan_q4.xlsx';
+      const T = table11(BOOK, 'Target', 'A', 'D');
+      const ACH = 'B5/VLOOKUP(A5,' + T + ',4,FALSE)';
+      const FLIP = 'VLOOKUP(A5,' + T + ',4,FALSE)/B5';
+      const tiers = (a, ge) => 'IF(' + a + ge + '1.2,5%,IF(' + a + ge + '1,3%,IF(' + a + ge + '0.8,1%,0)))';
+      const SOLUTION = '=B5*' + tiers(ACH, '>=');
+      return real({
+        id: '11.4', from: 'anton', due: '11:45', title: 'Commission tiers with nested IF', main: 'Ringkasan', open: ['Target'], ansLabel: 'Commission (Rp)',
+        intro: [
+          'Siang {name}. Anton.',
+          'Q4 commission for the distributors. Net Q4 is in <b>ringkasan_q4.xlsx</b>, the Q4 targets are in <b>target_2026.xlsx</b>. Both open.',
+          '@file',
+          '<b>Achievement</b> = Net Q4 ÷ that distributor\'s Q4 target.',
+          'Rate: at least <b>120%</b> = 5% · at least <b>100%</b> = 3% · at least <b>80%</b> = 1% · below 80% = 0.',
+          '<b>Commission = Net Q4 × rate</b>, in rupiah. Column C, every distributor.',
+          'Three of them landed exactly on a line. On the line counts.'
+        ],
+        ask: 'Commission in column C: Net Q4 × 5%, 3%, 1% or 0, for an achievement (Net Q4 ÷ Q4 target) of at least 120%, at least 100%, at least 80%, or below 80%.',
+        lesson: {
+          idea: 'A nested IF picks a tier. Test the highest tier first, because the first true test wins.',
+          teach: '<p><b>1. The achievement.</b> <code>B5/VLOOKUP(A5,' + T + ',4,FALSE)</code>: this file\'s net over the other file\'s target.</p><p><b>2. The rate, top tier first.</b> <code>IF(ach&gt;=1.2, 5%, IF(ach&gt;=1, 3%, IF(ach&gt;=0.8, 1%, 0)))</code>, with the achievement where it says ach. A distributor at 130% passes the first test and stops there. Start from 80% instead and everyone above it stops at 1%. "At least" means <code>&gt;=</code>, so exactly 100% earns 3%.</p><p><b>3. The rupiah.</b> Put <code>B5*</code> in front of the IF. If the formula feels long, <code>LET(ach, …, …)</code> names the achievement once.</p>',
+          ex: [['=50000000*', 'Rp 50 million of sales, times'], ['IF(0.95>=1.2,5%,', 'at least 120%? No, go on,'], ['IF(0.95>=1,3%,', 'at least 100%? No, go on,'], ['IF(0.95>=0.8,1%,0)))', 'at least 80%? Yes: 1%.']],
+          exFormula: '=50000000*IF(0.95>=1.2,5%,IF(0.95>=1,3%,IF(0.95>=0.8,1%,0)))', exLabel: 'rupiah of commission on Rp 50 million at 95% of target',
+          bridge: 'Like accruing a sales bonus: find the band from achievement, then apply its rate to the sales.'
+        },
+        starter: '=B5*IF(', fnKey: 'IF(', chips: [ACH, '>=1.2,5%,', '>=1,3%,', '>=0.8,1%,0)))', T],
+        solution: SOLUTION,
+        alts: [
+          '=LET(ach,' + ACH + ',B5*IF(ach>=1.2,5%,IF(ach>=1,3%,IF(ach>=0.8,1%,0))))',
+          '=B5*IFS(' + ACH + '>=1.2,5%,' + ACH + '>=1,3%,' + ACH + '>=0.8,1%,TRUE,0)',
+          '=LET(ach,' + ACH + ',B5*IFS(ach>=1.2,5%,ach>=1,3%,ach>=0.8,1%,TRUE,0))',
+          '=IF(' + ACH + '>=1.2,B5*5%,IF(' + ACH + '>=1,B5*3%,IF(' + ACH + '>=0.8,B5*1%,0)))',
+          '=B5*IF(' + ACH + '>=1.2,0.05,IF(' + ACH + '>=1,0.03,IF(' + ACH + '>=0.8,0.01,0)))',
+          '=B5*IF(' + ACH + '<0.8,0,IF(' + ACH + '<1,1%,IF(' + ACH + '<1.2,3%,5%)))',
+          '=LET(ach,B5/XLOOKUP(A5,' + range11(BOOK, 'Target', 'A') + ',' + range11(BOOK, 'Target', 'D') + '),B5*IF(ach>=1.2,5%,IF(ach>=1,3%,IF(ach>=0.8,1%,0))))',
+          '=LET(ach,B5/INDEX(' + range11(BOOK, 'Target', 'D') + ',MATCH(A5,' + range11(BOOK, 'Target', 'A') + ',0)),B5*IF(ach>=1.2,5%,IF(ach>=1,3%,IF(ach>=0.8,1%,0))))',
+          '=B5*IF(' + ACH + '>=120%,5%,IF(' + ACH + '>=100%,3%,IF(' + ACH + '>=80%,1%,0)))',
+          '=B5*XLOOKUP(' + ACH + ',{0,0.8,1,1.2},{0,0.01,0.03,0.05},,-1)'
+        ],
+        traps: [
+          { code: 'order', formula: '=B5*IF(' + ACH + '>=0.8,1%,IF(' + ACH + '>=1,3%,IF(' + ACH + '>=1.2,5%,0)))', title: 'Everyone from 80% up gets 1%', plain: 'IF stops at the first test that is true. 132% is also at least 80%, so testing 80% first gives everyone above it 1%. Test the highest tier first: 120%, then 100%, then 80%.', reply: DIST11[0] + ' hit 132% and gets 1%? My best distributor. Check the top tier first: <b>120%</b>, then 100%, then 80%.' },
+          { code: 'edge', formula: '=B5*' + tiers(ACH, '>'), title: 'On the line counts', plain: '"At least 120%" includes exactly 120%. With > the three distributors on the line drop a tier. Use >= in every test.', reply: DIST11[1] + ' hit exactly 120% and gets 3%. The scheme says <b>at least</b>. Use <b>&gt;=</b>.' },
+          { code: 'rate', formula: '=' + tiers(ACH, '>='), title: 'That is the rate, not rupiah', plain: 'The IF gives the rate: 5%, 3%, 1% or 0. Multiply it by Net Q4 in B5 for the commission in rupiah.', reply: 'I see 0.05 and 0.03. That is the rate. I pay in rupiah: times <b>Net Q4</b> in column B.' },
+          { code: 'flipped', formula: '=B5*' + tiers(FLIP, '>='), title: 'Achievement upside down', plain: 'Target ÷ net gives the weakest distributor the biggest number. Achievement is Net Q4 in B5 divided by the target.', reply: DIST11[8] + ' made 60% of target and gets the top rate? Achievement is <b>net ÷ target</b>, not the other way.' }
+        ],
+        replies: {
+          pass: ['Good. Eleven distributors earn commission this quarter 💰', DIST11[1] + ', ' + DIST11[3] + ' and ' + DIST11[6] + ' sat exactly on the line, and they are paid right. Terima kasih.'],
+          frozen: 'This morning ' + DIST11[2] + ' booked a late Q4 invoice and finance corrected one target. Your column did not move.',
+          typed: 'Typed amounts will be wrong when a target changes. Formula please.'
+        },
+        note: { fn: 'Tiered commission', what: 'Achievement from two workbooks, tiers tested from the top with >=, then the rate × the sales.', shape: SOLUTION },
+        hints: [
+          'Two steps: the achievement, Net Q4 ÷ the Q4 target from target_2026.xlsx, then the rate for its tier. Commission is B5 × that rate.',
+          'The achievement is ' + ACH + '. Test it with >=1.2 first, then >=1, then >=0.8, else 0.',
+          'It looks like ' + SOLUTION + '.'
+        ]
+      });
+    })(),
+    (() => {
+      const FB = 'persetujuan_order.xlsx';
+      const T = table11(FB, 'Pinjaman', 'B', 'G');
+      const V = (n) => 'VLOOKUP(A5,' + T + ',' + n + ',FALSE)';
+      const X = (c) => 'XLOOKUP(A5,' + range11(FB, 'Pinjaman', 'B') + ',' + range11(FB, 'Pinjaman', c) + ')';
+      const HOLD = 'OR(' + V(4) + '>60,' + V(3) + '+B5>' + V(2) + ')';
+      return real({
+        id: '11.5', from: 'lestari', due: '13:30', title: 'Approve, review or hold', main: 'Order', open: ['Pinjaman'], ansLabel: 'Decision',
+        /* Row 11: a distributor more than 60 days late whose order still fits its limit, so AND and a missing order give different answers.
+           Rows 6 and 14 swap whole orders, so UD Jalak Sentosa (row 6 of the loan book) sits on row 14 and a range without $ slides past it to #N/A. */
+        edit: (c) => { c.A11 = 'CV Bangau Sejahtera'; [c.A6, c.B6, c.A14, c.B14] = [c.A14, c.B14, c.A6, c.B6]; },
+        intro: [
+          'Siang {name}! Bu Lestari from Credit Control.',
+          'Ten orders are waiting for my sign-off before the year-end cut-off. They are in <b>persetujuan_order.xlsx</b>.',
+          'Our distributors pay through their facility at Bank Kenari, so I check each one against the bank\'s loan book, <b>buku_pinjaman.xlsx</b>. Both are open.',
+          '@file',
+          'The rule, in this order:',
+          '<b>HOLD</b> if the distributor is <b>more than 60 days late</b>, OR its outstanding plus this order would be <b>more than its limit</b>.',
+          'Otherwise <b>APPROVE</b> if it is <b>0 days late</b>, and <b>REVIEW</b> for everyone else.',
+          'Find each distributor by name in column B of the loan book. The decision goes in column C, in capitals exactly like that please. The approval system reads them.'
+        ],
+        ask: 'HOLD if more than 60 days late OR outstanding + this order is more than the limit; else APPROVE if 0 days late; else REVIEW. Every order, in column C.',
+        lesson: {
+          idea: 'One IF can sit inside another, and OR lets either of two tests trigger the first answer.',
+          teach: '<p>First the facts. The loan book table is <code>' + T + '</code>. Counting from column B: limit is column 2, outstanding 3, days late 4. Each fact is its own <code>VLOOKUP(A5, table, n, FALSE)</code>.</p>' +
+            '<p>Then the rule: <code>IF(OR(test 1, test 2), "HOLD", IF(test 3, "APPROVE", "REVIEW"))</code>. OR is TRUE when either test is true. The inner IF only runs for orders that are not a HOLD, so it never has to check them again.</p>' +
+            '<p>Read "more than" as <code>&gt;</code>. An order that lands exactly on the limit is not over it.</p>',
+          ex: [
+            ['=IF(OR(', 'If either test is true:'],
+            [V(4) + '>60,', 'more than 60 days late,'],
+            [V(3) + '+B5>' + V(2) + '),', 'or outstanding plus this order is more than the limit,'],
+            ['"HOLD","not yet")', 'say HOLD, otherwise not yet.']
+          ],
+          exFormula: '=IF(' + HOLD + ',"HOLD","not yet")', exLabel: 'for CV Nuri Makmur, so the second IF decides its order',
+          bridge: 'Like the credit check before a sales order is released: an overdue account or a blown credit limit blocks it, a clean account goes through.'
+        },
+        starter: '=IF(OR(', fnKey: 'IF(OR(',
+        chips: ['VLOOKUP(A5,', T, ',4,FALSE)', ',3,FALSE)', ',2,FALSE)', '>60,', '+B5>', '),"HOLD",IF(', '=0,"APPROVE","REVIEW"))'],
+        solution: '=IF(' + HOLD + ',"HOLD",IF(' + V(4) + '=0,"APPROVE","REVIEW"))',
+        alts: [
+          '=IFS(' + HOLD + ',"HOLD",' + V(4) + '=0,"APPROVE",TRUE,"REVIEW")',
+          '=LET(late,' + V(4) + ',IF(OR(late>60,' + V(3) + '+B5>' + V(2) + '),"HOLD",IF(late=0,"APPROVE","REVIEW")))',
+          '=IF(OR(' + X('E') + '>60,' + X('D') + '+B5>' + X('C') + '),"HOLD",IF(' + X('E') + '=0,"APPROVE","REVIEW"))',
+          '=IF(OR(' + V(4) + '>60,B5>' + V(2) + '-' + V(3) + '),"HOLD",IF(' + V(4) + '>0,"REVIEW","APPROVE"))'
+        ],
+        exactCase: true,
+        traps: [
+          { code: 'and', formula: '=IF(AND(' + V(4) + '>60,' + V(3) + '+B5>' + V(2) + '),"HOLD",IF(' + V(4) + '=0,"APPROVE","REVIEW"))', title: 'AND needs both tests to be true', plain: 'The rule holds an order when either test is true. That is OR, not AND.', reply: 'UD Cucak Berkah would go Rp 1,000,000 over its limit, and it says APPROVE? 😟 And CV Bangau Sejahtera is 75 days late. Either one is enough for a HOLD: <b>OR</b>, not AND.' },
+          { code: 'noorder', formula: '=IF(OR(' + V(4) + '>60,' + V(3) + '>' + V(2) + '),"HOLD",IF(' + V(4) + '=0,"APPROVE","REVIEW"))', title: 'The new order is missing', plain: 'The limit test is outstanding plus this order, B5, against the limit.', reply: 'UD Srigunting Utama has Rp 1,500,000 of room left and this order is Rp 2,000,000. Approved? 😟 Add <b>this order</b> in B5 to the outstanding before you compare it with the limit.' },
+          { code: 'swap', formula: '=IF(' + HOLD + ',"HOLD",IF(' + V(4) + '=0,"REVIEW","APPROVE"))', title: 'APPROVE and REVIEW are swapped', plain: '0 days late is APPROVE. The ones paying late, but not more than 60 days, get REVIEW.', reply: 'CV Nuri Makmur pays on time, 0 days late, and it goes to REVIEW? 🤔 <b>0 days late</b> is APPROVE. REVIEW is for the ones paying a little late.' },
+          { code: 'atlimit', formula: '=IF(OR(' + V(4) + '>60,' + V(3) + '+B5>=' + V(2) + '),"HOLD",IF(' + V(4) + '=0,"APPROVE","REVIEW"))', title: 'Exactly at the limit is not over it', plain: 'The rule says more than the limit. Use > instead of >=.', reply: 'CV Kutilang Abadi lands on exactly Rp 50,000,000, its limit. That is not <b>more than</b> the limit, so it is not a HOLD. Use <b>&gt;</b>, not &gt;=.' }
+        ],
+        replies: {
+          pass: ['Terima kasih. Four on HOLD, three go straight through, and three for me to read 🙏', 'CV Bangau Sejahtera still has room on its facility, but 75 days late is a HOLD. I would have missed that one by eye.'],
+          frozen: 'Bank Kenari sent a new loan book this morning. UD Seriti Jaya is now 65 days late and your column still says REVIEW. It has to read the loan book every time.',
+          typed: 'Typed decisions will not follow the loan book 🙏 A formula please.'
+        },
+        note: { fn: 'Nested IF with OR', what: 'IF(OR(test 1, test 2), first answer, IF(test 3, second answer, third answer)). Each fact comes from its own VLOOKUP.', shape: '=IF(OR(VLOOKUP(A5,[buku_pinjaman.xlsx]Pinjaman!$B$5:$G$18,4,FALSE)>60,VLOOKUP(A5,[buku_pinjaman.xlsx]Pinjaman!$B$5:$G$18,3,FALSE)+B5>VLOOKUP(A5,[buku_pinjaman.xlsx]Pinjaman!$B$5:$G$18,2,FALSE)),"HOLD",IF(VLOOKUP(A5,[buku_pinjaman.xlsx]Pinjaman!$B$5:$G$18,4,FALSE)=0,"APPROVE","REVIEW"))' },
+        hints: [
+          'Three facts from the loan book: limit, outstanding and days late. Look up A5 in $B$5:$G$18. Counting from column B, they are columns 2, 3 and 4.',
+          'The HOLD test is OR(days late>60, outstanding+B5>limit). When it is false, a second IF gives APPROVE if days late=0, otherwise REVIEW.',
+          'It looks like =IF(OR(' + V(4) + '>60,' + V(3) + '+B5>' + V(2) + '),"HOLD",IF(' + V(4) + '=0,"APPROVE","REVIEW")).'
+        ]
+      });
+    })(),
+    (() => {
+      const G = 'IFS(E5=0,1,E5<=90,2,E5<=120,3,E5<=180,4,TRUE,5)';
+      const GS = 'IFS(E5=0,1,E5<90,2,E5<120,3,E5<180,4,TRUE,5)';
+      const NG = 'IF(E5=0,1,IF(E5<=90,2,IF(E5<=120,3,IF(E5<=180,4,5))))';
+      return real({
+        id: '11.6', from: 'citra', due: '14:00', title: 'Grades with a restructuring floor', main: 'Pinjaman', open: [], ansCol: 'H', ansLabel: 'Kol',
+        /* Two facilities sit exactly on an edge (90 and 180 days), so < instead of <= shows on either edge. UD Jalak Sentosa
+           carries the 90: no other request cites its days late (CV Kepodang Niaga's 95 is quoted in 11.7 and 11.9).
+           Overnight, UD Pipit Karya is restructured, so a formula that singles out F104 is caught. */
+        edit: (c, v) => { c.E6 = 90; c.E18 = 180; if (v === 'alt') c.F12 = 'Y'; },
+        intro: [
+          'Siang {name}. Year-end grading of our own loan book, <b>buku_pinjaman.xlsx</b>.',
+          'Same grade as before, by days late in column E:',
+          '<b>0 days</b> = 1 · <b>up to 90</b> = 2 · <b>up to 120</b> = 3 · <b>up to 180</b> = 4 · <b>more</b> = 5',
+          '@file',
+          'Plus Bank Kenari\'s restructuring rule: a facility with <b>Y</b> in column F is <b>never better than grade 2</b>.',
+          'Restructured and on time is still a 2. A restructured 4 stays a 4.',
+          'Column H, every facility please.'
+        ],
+        ask: 'Grade 1 to 5 by days late, but at least 2 when Restructured is Y. Every row, in column H.',
+        lesson: {
+          idea: 'MAX can put a floor under a number: it can go up, never below the floor.',
+          teach: '<p><code>MAX(grade, 2)</code> gives the bigger of the two. A 1 becomes 2, a 4 stays 4. In collectibility a bigger grade is worse, so "never better than 2" means "at least 2", and that is MAX. MIN does the opposite: every restructured loan worse than 2 would show as a 2.</p><p>Only restructured facilities get the floor, so wrap it in IF: <code>IF(F5="Y", MAX(grade,2), grade)</code>. The grade is the IFS from Chapter 2, written in both places.</p>',
+          ex: [['=MAX(', 'The bigger of'], ['IFS(E8=0,1,E8<=90,2,E8<=120,3,E8<=180,4,TRUE,5),', 'F104\'s grade by days late, a 1,'], ['2)', 'and the floor, 2.']],
+          exFormula: '=MAX(IFS(E8=0,1,E8<=90,2,E8<=120,3,E8<=180,4,TRUE,5),2)', exLabel: 'for F104, on time but restructured',
+          bridge: 'Like prudence in accounting: when two measures disagree, you book the more cautious one.'
+        },
+        starter: '=IF(', fnKey: 'MAX(', chips: ['F5="Y"', ',', G, ',2)', ')'],
+        solution: '=IF(F5="Y",MAX(' + G + ',2),' + G + ')',
+        alts: [
+          '=MAX(' + G + ',IF(F5="Y",2,1))',
+          '=LET(g,' + G + ',IF(F5="Y",MAX(g,2),g))',
+          '=IF(F5="Y",MAX(' + NG + ',2),' + NG + ')',
+          '=IF(F5="N",' + G + ',MAX(2,' + G + '))',
+          '=IF(AND(F5="Y",E5<=90),2,' + G + ')',
+          '=IFS(E5=0,IF(F5="Y",2,1),E5<=90,2,E5<=120,3,E5<=180,4,TRUE,5)',
+          '=MAX(IF(F5="Y",2,1),XLOOKUP(E5,{0,1,91,121,181},{1,2,3,4,5},,-1))'
+        ],
+        traps: [
+          { code: 'noflag', formula: '=' + G, title: 'The restructuring rule is missing', plain: 'By days late F104 is a 1, since it pays on time. It is restructured (Y in column F), so Bank Kenari\'s rule lifts it to 2. Wrap the grade: IF(F5="Y", MAX(grade,2), grade).', reply: 'F104 is a 1? It pays on time, but it is <b>restructured</b>. Our rule: never better than 2.' },
+          { code: 'min', formula: '=IF(F5="Y",MIN(' + G + ',2),' + G + ')', title: 'MIN made the bad loans look better', plain: 'MIN keeps the smaller number, so F107 and F114, both grade 4, dropped to 2. Never better than 2 means at least 2: the bigger number, MAX.', reply: 'F107 is 130 days late and you made it a 2? 😳 Restructuring never makes a loan look <b>better</b>. MAX, not MIN.' },
+          { code: 'strict', formula: '=IF(F5="Y",MAX(' + GS + ',2),' + GS + ')', title: 'Exactly 90 days is grade 2', plain: 'Up to 90 includes 90, and up to 180 includes 180. Use <= on every edge, not <.', reply: 'F102 is exactly 90 days late, and up to 90 is grade 2. F114 at 180 is a 4, not a 5. <b>&lt;=</b> on the edges please.' },
+          { code: 'flat', formula: '=IF(F5="Y",2,' + G + ')', title: 'A floor, not a fixed grade', plain: 'The rule puts a floor under the grade: at least 2. F107 and F114 are grade 4 by days late and stay 4. Compare the grade with 2 and keep the bigger one.', reply: 'All four restructured loans are a 2? F114 is 180 days late, that is a 4 🤔 Our rule is a <b>floor</b>. A restructured loan can be worse than 2.' }
+        ],
+        replies: {
+          pass: ['Clean. F104 pays on time and still reads 2, as it should ✅', 'This column goes straight into the year-end review pack. Terima kasih.'],
+          frozen: 'Overnight CV Nuri Makmur slipped to 31 days late and UD Pipit Karya was restructured. Your grades did not move.',
+          typed: 'Typed grades will not follow tomorrow\'s loan book 😅 Formula please.'
+        },
+        note: { fn: 'MAX as a floor', what: 'MAX(grade, 2) is never below 2. Inside IF, only the rows that need the floor get it.', shape: '=IF(F5="Y",MAX(' + G + ',2),' + G + ')' },
+        hints: [
+          'First the grade by days late, the IFS from before. Then the restructuring rule on top.',
+          'If F5 is "Y", take MAX of the grade and 2. Otherwise the grade as it is.',
+          'It looks like =IF(F5="Y",MAX(' + G + ',2),' + G + ').'
+        ]
+      });
+    })(),
+    (() => {
+      const P = (c) => range11('memo_risiko.xlsx', 'Pinjaman', c);
+      return real({
+        id: '11.7', from: 'dimas', due: '14:30', title: 'Late exposure by region, from a cell', main: 'Memo', open: ['Pinjaman'], answerCell: 'B3', frozenTry: '=SUMIFS(' + P('D') + ',' + P('G') + ',B1,' + P('E') + ',">30")',
+        top: (v) => ({ A1: 'Region', B1: v === 'alt' ? 'Sulawesi' : 'Jawa Tengah', A2: 'Days late over', B2: v === 'alt' ? 35 : 30, A3: 'Outstanding (Rp)' }),
+        intro: [
+          'Siang {name}! Dimas here, working on the year-end risk memo 📝',
+          'The loan book is <b>buku_pinjaman.xlsx</b> and my memo is <b>memo_risiko.xlsx</b>. Both are open.',
+          '@file',
+          'The memo has a region in <b>B1</b> and a days-late cut-off in <b>B2</b>.',
+          'In <b>B3</b> I need the total <b>Outstanding</b> of the facilities in that region that are <b>more than B2 days late</b>. Exactly B2 days does not count.',
+          'I will change B1 and B2 for every region in the memo, so read both from the cells 🙏'
+        ],
+        ask: 'Total Outstanding in the region in <b>B1</b>, facilities more than <b>B2</b> days late, in <b>B3</b>.',
+        lesson: {
+          idea: 'To use a cell inside a condition, join the sign to the cell with &.',
+          teach: '<p>A condition with a sign is text in quotes: <code>"&gt;30"</code> works. <code>"&gt;B2"</code> does not: inside the quotes, B2 is two letters, not a cell. Excel compares the days late with the text "B2" and finds nothing. And <code>B2</code> with no sign asks for exactly 30 days.</p><p>Keep the sign in quotes and join the cell outside them with &amp;: <code>"&gt;"&amp;B2</code>. Excel reads B2 first, so with 30 in B2 the condition becomes <code>"&gt;30"</code>. Change B2 and the condition follows.</p><p>One catch across workbooks: SUMIFS, SUMIF and COUNTIFS need the other file <b>open</b>. If buku_pinjaman.xlsx is closed, they show #VALUE! the next time Excel recalculates. SUMPRODUCT works either way.</p>',
+          ex: [['=COUNTIFS(', 'Count the facilities'], [P('E') + ',', 'in the loan book whose days late'], ['">"&B2)', 'are more than the number in B2.']],
+          exFormula: '=COUNTIFS(' + P('E') + ',">"&B2)', exLabel: 'facilities more than B2 days late, every region',
+          bridge: 'Like an aging report with the cut-off in one cell: change the cell and the whole report follows.'
+        },
+        starter: '=SUMIFS(', fnKey: 'SUMIFS(', chips: [P('D'), ',' + P('G'), ',B1', ',' + P('E'), ',">"', '&B2', ')'],
+        solution: '=SUMIFS(' + P('D') + ',' + P('G') + ',B1,' + P('E') + ',">"&B2)',
+        alts: [
+          '=SUMIFS(' + P('D') + ',' + P('E') + ',">"&B2,' + P('G') + ',B1)',
+          '=SUMIFS(' + P('D') + ',' + P('G') + ',$B$1,' + P('E') + ',">"&$B$2)',
+          '=SUMPRODUCT((' + P('G') + '=B1)*(' + P('E') + '>B2)*' + P('D') + ')',
+          '=SUM(FILTER(' + P('D') + ',(' + P('G') + '=B1)*(' + P('E') + '>B2),0))',
+          '=LET(late,">"&B2,SUMIFS(' + P('D') + ',' + P('G') + ',B1,' + P('E') + ',late))'
+        ],
+        traps: [
+          { code: 'quoted', formula: '=SUMIFS(' + P('D') + ',' + P('G') + ',B1,' + P('E') + ',">B2")', title: 'No facility passed the conditions', plain: 'A total of 0 means nothing matched. Inside quotes, ">B2" compares the days late with the letters B2, and B2 with no sign asks for exactly the number in B2. Keep the sign in quotes and join the cell outside: ">"&B2.', reply: 'Rp {value}? CV Kepodang Niaga is 95 days late, so it should count 😅 Check the days-late condition. Inside quotes, B2 is only two letters.' },
+          { code: 'region', formula: '=SUMIF(' + P('G') + ',B1,' + P('D') + ')', title: 'Every facility in the region', plain: 'With one condition, every facility in the region is in the total, late or not. Use SUMIFS and add the days-late pair.', reply: 'Rp {value} is all of Jawa Tengah. UD Seriti Jaya is only 15 days late. I need the ones <b>more than B2 days late</b>.' },
+          { code: 'allregions', formula: '=SUMIF(' + P('E') + ',">"&B2,' + P('D') + ')', title: 'Every region', plain: 'That is every late facility in the loan book. Use SUMIFS and add the region pair, so only the region in B1 counts.', reply: 'Rp {value}? That is the late book for the whole country 😄 Only the region in <b>B1</b> please.' },
+          { code: 'limit', formula: '=SUMIFS(' + P('C') + ',' + P('G') + ',B1,' + P('E') + ',">"&B2)', title: 'That is the limit, not the outstanding', plain: 'Column C is the limit the bank agreed to. What they owe today is Outstanding, column D. The first range in SUMIFS is the one it adds.', reply: 'Rp {value} is the <b>limit</b>. The risk is what they still owe: <b>Outstanding</b>, column D.' }
+        ],
+        replies: {
+          pass: ['Rp {value} more than 30 days late in Jawa Tengah. Mantap, that goes in the memo 📝', 'Now I change two cells and the next region is done. Makasih!'],
+          frozen: 'I switched B1 to Sulawesi and B2 to 35, and your total went wrong 😅 CV Kasuari Sentral is exactly 35 days late, so it stays out. Read both cells, and use <b>"&gt;"</b>, not "&gt;=".',
+          typed: 'Typed in? I change B1 and B2 for every region, so it has to follow them 🙏'
+        },
+        note: { fn: 'A condition from a cell', what: 'Join the sign and the cell: ">"&B2. Inside quotes, B2 is only text. SUMIFS on another workbook needs that file open.', shape: '=SUMIFS([buku_pinjaman.xlsx]Pinjaman!$D$5:$D$18,[buku_pinjaman.xlsx]Pinjaman!$G$5:$G$18,B1,[buku_pinjaman.xlsx]Pinjaman!$E$5:$E$18,">"&B2)' },
+        hints: [
+          'Two conditions, region and days late, so SUMIFS. It adds Outstanding, column D of the loan book.',
+          'Region is column G, compared with B1. Days late is column E, compared with ">"&B2, the sign in quotes joined to the cell.',
+          'It looks like =SUMIFS([buku_pinjaman.xlsx]Pinjaman!$D$5:$D$18,[buku_pinjaman.xlsx]Pinjaman!$G$5:$G$18,B1,[buku_pinjaman.xlsx]Pinjaman!$E$5:$E$18,">"&B2).'
+        ]
+      });
+    })(),
+    (() => {
+      const BK = 'penjualan_q4.xlsx';
+      const TBL = table11(BK, 'Tarif', 'B', 'E');
+      const REG = range11(BK, 'Tarif', 'A');
+      const HDR = sheetRef(BK, SHEET11.Tarif.book, 'Tarif') + '$B$4:$E$4';
+      const TGT = table11(BK, 'Target', 'A', 'D');
+      const PRD = PROD(BK);
+      const AREA = 'VLOOKUP(B5,' + TGT + ',2,FALSE)';
+      const CAT = 'VLOOKUP(C5,' + PRD + ',3,FALSE)';
+      const ROW = 'MATCH(' + AREA + ',' + REG + ',0)';
+      const COL = 'MATCH(' + CAT + ',' + HDR + ',0)';
+      const SOL = '=D5*INDEX(' + TBL + ',' + ROW + ',' + COL + ')';
+      return real({
+        id: '11.8', from: 'bayu', due: '15:45', title: 'Shipping from the rate card', main: 'Penjualan', open: ['Target', 'Produk', 'Tarif'], ansLabel: 'Shipping (Rp)',
+        intro: [
+          'Sore {name} 👷 The shipping company sent its new rate card, <b>tarif_kirim.xlsx</b>.',
+          'It is rupiah per carton. The <b>regions</b> run down the side (A5:A11) and the <b>categories</b> across the top (B4:E4).',
+          'The sales lines show neither one. The distributor\'s region is its <b>Area</b> in target_2026.xlsx. The SKU\'s <b>category</b> is in master_produk.xlsx.',
+          '@file',
+          'Column E: the shipping cost of every line. Cartons × the rate where that Area and that category cross.'
+        ],
+        ask: 'Cartons × the rate per carton for the distributor\'s Area (row) and the SKU\'s category (column) in tarif_kirim.xlsx, every line, in column E.',
+        lesson: {
+          idea: 'A rate card has two keys. One MATCH finds the row, a second MATCH finds the column, and INDEX reads the box where they cross.',
+          teach: '<p><b>1. Find the row.</b> The sales line has no region, so look it up first: <code>VLOOKUP(B5,[target_2026.xlsx]Target!$A$5:$D$18,2,FALSE)</code> gives the Area. Then <code>MATCH(that Area,[tarif_kirim.xlsx]Tarif!$A$5:$A$11,0)</code> says which row of the rate card it is. The first line is UD Murai Niaga, in Jawa Barat: row 2.</p>'
+            + '<p><b>2. Find the column.</b> Same idea for the category: <code>VLOOKUP(C5,[master_produk.xlsx]Produk!$A$5:$D$16,3,FALSE)</code>, then <code>MATCH(that category,[tarif_kirim.xlsx]Tarif!$B$4:$E$4,0)</code>. KSJ-ARE is Coffee: column 2.</p>'
+            + '<p><b>3. INDEX.</b> <code>INDEX([tarif_kirim.xlsx]Tarif!$B$5:$E$11, row, column)</code> reads the rate where they cross. Row first, then column. Then times the cartons.</p>'
+            + '<p>End every MATCH with <code>0</code> for an exact match. Without it, Excel assumes the list is sorted A to Z, and this rate card is not. VLOOKUP ends with <code>FALSE</code>, MATCH ends with <code>0</code>: both mean exact.</p>'
+            + '<p>Keep the three rate card ranges lined up: the rates <code>$B$5:$E$11</code>, the regions on the same rows <code>$A$5:$A$11</code>, the categories in the same columns <code>$B$4:$E$4</code>.</p>',
+          ex: [['=INDEX(' + TBL + ',', 'In the rates,'], ['MATCH("Sumatera",' + REG + ',0),', 'go down to the Sumatera row,'], ['MATCH("Soap",' + HDR + ',0))', 'then across to the Soap column.']],
+          exFormula: '=INDEX(' + TBL + ',MATCH("Sumatera",' + REG + ',0),MATCH("Soap",' + HDR + ',0))', exLabel: 'rupiah per carton of soap to Sumatera',
+          bridge: 'Like a depreciation rate table: find the asset group down the side, the method across the top, and read the rate where they meet.'
+        },
+        starter: '=D5*INDEX(', fnKey: 'INDEX(',
+        chips: ['MATCH(', 'VLOOKUP(', TBL, REG, HDR, TGT, PRD, ',2', ',3', ',FALSE)', ',0)'],
+        solution: SOL,
+        alts: [
+          '=INDEX(' + TBL + ',' + ROW + ',' + COL + ')*D5',
+          '=D5*INDEX(' + TBL + ',XMATCH(' + AREA + ',' + REG + '),XMATCH(' + CAT + ',' + HDR + '))',
+          '=LET(area,' + AREA + ',cat,' + CAT + ',D5*INDEX(' + TBL + ',MATCH(area,' + REG + ',0),MATCH(cat,' + HDR + ',0)))',
+          '=D5*XLOOKUP(XLOOKUP(B5,' + range11(BK, 'Target', 'A') + ',' + range11(BK, 'Target', 'B') + '),' + REG + ',XLOOKUP(XLOOKUP(C5,' + range11(BK, 'Produk', 'A') + ',' + range11(BK, 'Produk', 'C') + '),' + HDR + ',' + TBL + '))'
+        ],
+        traps: [
+          { code: 'approx', formula: '=D5*INDEX(' + TBL + ',MATCH(' + AREA + ',' + REG + '),MATCH(' + CAT + ',' + HDR + '))', title: 'Each MATCH needs its 0', plain: 'Without the 0, MATCH assumes the list is sorted A to Z. The rate card is not sorted, so the practice sheet finds nothing (#N/A), and desktop Excel can land on a wrong rate without any warning. End both MATCHes with ,0. Both 0s already there? Then check that the VLOOKUPs bring back the Area (column 2) and the category (column 3), and that every range keeps its $.', reply: 'Column E says #N/A 🤔 Does each MATCH end with <b>,0</b>? Without it, MATCH reads the rate card as if it were sorted A to Z, and it is not. In Excel it can even pick a wrong rate quietly.' },
+          { code: 'swap', formula: '=D5*INDEX(' + TBL + ',' + COL + ',' + ROW + ')', title: 'Row first, then column', plain: 'INDEX takes the row number first and the column number second. The regions are the rows and the categories are the columns. Here the category went in as the row and the region as the column. A region past the 4th column gives #REF!, and the other lines read the wrong box. If the order is right, check that the categories are $B$4:$E$4, the same columns as the rates $B$5:$E$11.', reply: '#REF! on some lines 😅 The rate card has 7 regions down but only 4 categories across. INDEX wants the <b>row</b> first, the region, then the <b>column</b>, the category.' },
+          { code: 'shift', formula: '=D5*INDEX(' + sheetRef(BK, SHEET11.Tarif.book, 'Tarif') + '$A$5:$E$11,' + ROW + ',' + COL + ')', title: 'The ranges do not line up with the rates', plain: 'INDEX counts rows and columns from the top-left box of its own range. The rates are $B$5:$E$11. Start INDEX at column A or at row 4 and every read moves one box, so some lines land on a region name or a heading (#VALUE!). Keep the regions on the same rows, $A$5:$A$11, and the categories in the same columns, $B$4:$E$4.', reply: '#VALUE! on some lines 🤔 INDEX is reading one box off. The rates start at <b>B5</b>, so the regions start on row 5 and the categories in column B.' },
+          { code: 'rate', formula: '=INDEX(' + TBL + ',' + ROW + ',' + COL + ')', title: 'That is the rate for one carton', plain: 'INDEX gives the rate per carton. Multiply it by the cartons in D5.', reply: 'Rp {value} to ship 53 cartons? That is one carton 😄 Times the <b>cartons</b> in column D please.' }
+        ],
+        replies: {
+          pass: ['Mantap! Every line has its shipping cost 🚚', 'Four files, one formula. Next time the shipper changes a rate, I fix one box and column E follows.'],
+          frozen: 'The shipper raised the Sumatera and Sulawesi rates this morning and your column did not move 😅 It has to read the rate card.',
+          typed: 'Typed costs will be wrong the next time the rate card changes 🙏'
+        },
+        note: { fn: 'Two-way lookup across workbooks', what: 'VLOOKUP finds the Area and the category, MATCH turns each into a position on the rate card, INDEX reads the rate where row and column cross.', shape: SOL },
+        hints: [
+          'Work in steps: the distributor\'s Area from target_2026.xlsx, the SKU\'s category from master_produk.xlsx, then the rate where they cross in tarif_kirim.xlsx, times the cartons.',
+          'The row: MATCH the Area, VLOOKUP(B5,' + TGT + ',2,FALSE), in ' + REG + '. The column: MATCH the category, VLOOKUP(C5,' + PRD + ',3,FALSE), in ' + HDR + '. Both MATCHes end with 0, and INDEX takes the row first.',
+          'It looks like ' + SOL + '.'
+        ]
+      });
+    })(),
+    real({
+      id: '11.9', from: 'lestari', due: '16:15', title: 'Late fees with a floor and a cap', main: 'Pinjaman', open: ['Aturan'], ansCol: 'H', ansLabel: 'Late fee (Rp)',
+      /* Overnight the bank also raises the fee per day, so a typed 0.1 is caught as frozen like the other two rules. */
+      editOpen: (name, c, v) => { if (name === 'Aturan' && v === 'alt') c.B6 = 0.15; },
+      intro: [
+        'Sore {name}, Bu Lestari again.',
+        'Before I sign more orders, I want to see what each distributor owes Bank Kenari in late fees.',
+        'The loan book <b>buku_pinjaman.xlsx</b> is open. The bank\'s late-fee rules are on its second sheet, <b>Aturan</b>.',
+        '@file',
+        'Late fee = outstanding × the fee per day late (%) ÷ 100 × the days late <b>beyond the grace days</b>.',
+        'It is <b>never below 0</b>, so a loan inside the grace days pays nothing. And it is <b>never above the fee cap</b>.',
+        'Column H please. Take the grace days, the fee % and the cap from <b>Aturan</b>, because the bank changes them.'
+      ],
+      ask: 'Outstanding × fee % ÷ 100 × (days late − grace days), at least 0 and at most the cap from Aturan, every row, in column H.',
+      lesson: {
+        idea: 'MAX sets a floor and MIN sets a ceiling. Together they keep a number between the two.',
+        teach: '<p><code>MAX(0, fee)</code> takes the bigger of 0 and the fee, so it never drops below 0. <code>MIN(cap, fee)</code> takes the smaller, so it never goes above the cap. Put one inside the other: <code>MIN(cap, MAX(0, fee))</code>.</p><p>Build it from the inside out: the fee first, then <code>MAX(0, ...)</code> around it, then <code>MIN(cap, ...)</code> around that.</p><p>The rules sit on the <b>Aturan</b> sheet of this same workbook. When you click a cell on another sheet, Excel writes <code>Aturan!B5</code> with no $, unlike a cell in another workbook. Press <b>F4</b> (Cmd+T on a Mac) to pin it: <code>Aturan!$B$5</code>.</p>',
+        ex: [['=MAX(0,', 'The bigger of 0'], ['E7-Aturan!$B$5)', 'and the days late minus the grace days.']],
+        exFormula: '=MAX(0,E7-Aturan!$B$5)', exLabel: 'days to charge for F103',
+        bridge: 'Like a penalty clause in a contract: a grace period first, then a daily rate, up to a maximum penalty.'
+      },
+      starter: '=MIN(', fnKey: 'MIN(', chips: ['Aturan!$B$7', ',MAX(0,', 'D5', '*Aturan!$B$6/100', '*(E5-Aturan!$B$5)', '))'],
+      solution: '=MIN(Aturan!$B$7,MAX(0,D5*Aturan!$B$6/100*(E5-Aturan!$B$5)))',
+      alts: [
+        '=MAX(0,MIN(Aturan!$B$7,D5*Aturan!$B$6/100*(E5-Aturan!$B$5)))',
+        '=MIN(Aturan!$B$7,D5*Aturan!$B$6/100*MAX(0,E5-Aturan!$B$5))',
+        '=IF(E5<=Aturan!$B$5,0,MIN(Aturan!$B$7,D5*Aturan!$B$6/100*(E5-Aturan!$B$5)))',
+        '=MIN(Aturan!$B$7,MAX(0,D5*Aturan!$B$6%*(E5-Aturan!$B$5)))',
+        '=MEDIAN(0,D5*Aturan!$B$6/100*(E5-Aturan!$B$5),Aturan!$B$7)',
+        '=LET(fee,D5*Aturan!$B$6/100*(E5-Aturan!$B$5),MIN(Aturan!$B$7,MAX(0,fee)))'
+      ],
+      traps: [
+        { code: 'nomax', formula: '=MIN(Aturan!$B$7,D5*Aturan!$B$6/100*(E5-Aturan!$B$5))', title: 'On-time loans get a negative fee', plain: 'A loan with fewer days late than the grace days gives a minus fee. Wrap the fee in MAX(0, ...) so it never goes below 0.', reply: 'F101, CV Nuri Makmur, shows <b>minus</b> Rp 231,000. They paid on time, and the bank does not pay them for it 😅 Never below 0 please: <b>MAX(0, ...)</b>.' },
+        { code: 'nocap', formula: '=MAX(0,D5*Aturan!$B$6/100*(E5-Aturan!$B$5))', title: 'Some fees went over the cap', plain: 'Very late loans pass the cap in Aturan!$B$7. Take the smaller of the cap and the fee with MIN.', reply: 'F109, CV Tekukur Rejeki, at Rp 19,107,000? The bank stops at the cap, <b>Rp 5,000,000</b>. Take the smaller one with <b>MIN</b>.' },
+        { code: 'nograce', formula: '=MIN(Aturan!$B$7,MAX(0,D5*Aturan!$B$6/100*E5))', title: 'The grace days were charged too', plain: 'Only the days beyond the grace days count. Subtract Aturan!$B$5 from the days late in E5.', reply: 'F106, UD Seriti Jaya, is 15 days late. The first 7 are free, so only 8 days count. Please subtract the <b>grace days</b>.' },
+        { code: 'nodollar', formula: '=MIN(Aturan!B7,MAX(0,D5*Aturan!B6/100*(E5-Aturan!B5)))', title: 'The rule cells slid down', plain: 'Copied down, Aturan!B5 became Aturan!B6, then B7, and below the rules the cells are empty. Pin them with $: Aturan!$B$5, Aturan!$B$6, Aturan!$B$7.', reply: 'Every fee is 0? CV Kepodang Niaga is 95 days late 🤔 When you copy down, the Aturan cells move too. Press <b>F4</b> to add the <b>$</b>.' }
+      ],
+      frozenTry: '=MIN(Aturan!$B$7,MAX(0,D5*0.1/100*(E5-Aturan!$B$5)))',
+      replies: {
+        pass: ['Terima kasih. Five distributors already hit the full Rp 5,000,000 cap.', 'Kepodang, Rangkong, Tekukur, Bangau and Kedasi. I will call them before I approve new orders 🙏'],
+        frozen: 'Bank Kenari changed all three rules this morning: 5 grace days, 0.15% a day and a cap of Rp 4,000,000. Your fees still follow the old ones. Please read them from the Aturan sheet, not typed numbers.',
+        typed: 'Typed fees will not follow the bank\'s rules 🙏'
+      },
+      note: { fn: 'MIN and MAX together', what: 'MAX(0, x) is a floor and MIN(cap, x) a ceiling. Rules on another sheet are pinned with $.', shape: '=MIN(Aturan!$B$7,MAX(0,D5*Aturan!$B$6/100*(E5-Aturan!$B$5)))' },
+      hints: [
+        'The fee is D5 × the fee % ÷ 100 × the days beyond the grace days. Then keep it between 0 and the cap.',
+        'MAX(0, fee) stops it below 0, and MIN(Aturan!$B$7, ...) stops it above the cap. Pin the Aturan cells with $.',
+        'It looks like =MIN(Aturan!$B$7,MAX(0,D5*Aturan!$B$6/100*(E5-Aturan!$B$5))).'
+      ]
+    }),
+    (() => {
+      const FB = 'ringkasan_q4.xlsx';
+      const T = table11(FB, 'Pinjaman', 'B', 'G');
+      const V = (n) => 'VLOOKUP(A5,' + T + ',' + n + ',FALSE)';
+      const X = (c) => 'XLOOKUP(A5,' + range11(FB, 'Pinjaman', 'B') + ',' + range11(FB, 'Pinjaman', c) + ')';
+      const M = (c) => 'INDEX(' + range11(FB, 'Pinjaman', c) + ',MATCH(A5,' + range11(FB, 'Pinjaman', 'B') + ',0))';
+      const SOLUTION = '=IF(AND(' + V(4) + '>30,' + V(3) + '>B5/2),"WATCH","OK")';
+      /* Collection keeps its loan book sorted by days late, worst first, so its rows do not line up with the summary
+         and a row-by-row link ([buku_pinjaman.xlsx]Pinjaman!E5) gives wrong statuses. Only a lookup by name works. */
+      const P = SHEET11.Pinjaman;
+      const worstFirst = (name, c) => {
+        if (name !== 'Pinjaman') return;
+        const rows = [];
+        for (let r = P.first; r <= P.last; r++) rows.push(P.cols.map((k) => c[k + r]));
+        rows.sort((a, b) => b[4] - a[4] || (a[0] < b[0] ? -1 : 1));
+        rows.forEach((row, i) => P.cols.forEach((k, j) => { c[k + (P.first + i)] = row[j]; }));
+      };
+      return Object.assign(real({
+        id: '11.10', from: 'citra', due: '16:30', title: 'The watch list, across two real workbooks', main: 'Ringkasan', open: ['Pinjaman'], ansLabel: 'Status', editOpen: worstFirst,
+        intro: [
+          'Sore {name}. Last one of the year, and it goes to the credit committee in <b>real Excel</b> 💻',
+          'Our watch list for 2027 needs two files: Rasa Kenari\'s Q4 summary, <b>ringkasan_q4.xlsx</b>, and our loan book, <b>buku_pinjaman.xlsx</b>.',
+          '@file',
+          'The rule: a distributor is <b>WATCH</b> when it is <b>more than 30 days late</b> AND its outstanding is <b>more than half</b> of its Q4 net sales (column B of the summary). Otherwise <b>OK</b>.',
+          'Days late and outstanding are in the loan book. We sort it by days late, worst first, so match each distributor by name in its column B.',
+          'Download both files and open both in Excel.',
+          'In ringkasan_q4.xlsx, type the formula in <b>C5</b>. For the lookups, click into the loan book so Excel writes the link itself.',
+          'Fill it down to C18, with WATCH and OK in capitals. Save ringkasan_q4.xlsx and upload it here.'
+        ],
+        ask: 'In Excel: WATCH if more than 30 days late AND outstanding is more than half of Q4 net sales, else OK, in C5:C18 of ringkasan_q4.xlsx, linked to buku_pinjaman.xlsx. Then upload.',
+        lesson: {
+          idea: 'A real link between two workbooks: one file reads the other, and the link lives in the formula.',
+          teach: '<p>Open both files. In C5 of ringkasan_q4.xlsx, type <code>=IF(AND(VLOOKUP(A5,</code>, then switch to the buku_pinjaman.xlsx window and drag across B5:G18. Excel writes the link for you, like <code>' + T + '</code>, already pinned with $. Counting from column B: outstanding is column 3, days late is column 4. Keep typing <code>,4,FALSE)&gt;30,</code>, add the second lookup the same way, and Enter takes you back to ringkasan_q4.xlsx.</p>' +
+            '<p>Why a lookup, and not a link to the same row? The loan book is in another order. Row 5 there is a different distributor from row 5 here.</p>' +
+            '<p>Then the rule: <code>IF(AND(days late&gt;30, outstanding&gt;B5/2), "WATCH", "OK")</code>. Both tests must be true. "More than" is <code>&gt;</code>, so exactly half is not a WATCH. Type <code>B5</code> yourself: a click while the loan book is in front would point at the loan book\'s B5.</p>' +
+            '<p>When you close the loan book, Excel shows its full folder path inside the formula. That is normal. VLOOKUP keeps working with the file closed, and Excel asks to update the link the next time you open ringkasan_q4.xlsx. SUMIF and COUNTIF are different: they need the other file open, or they show #VALUE!.</p>',
+          bridge: 'Like cross-referencing to another working paper file: the link shows where each number came from, and it follows when that file changes.'
+        },
+        starter: '', fnKey: '', chips: [],
+        solution: SOLUTION,
+        alts: [
+          '=IF(AND(' + X('E') + '>30,' + X('D') + '>B5/2),"WATCH","OK")',
+          '=IF(AND(' + M('E') + '>30,' + M('D') + '>B5/2),"WATCH","OK")',
+          '=LET(late,' + V(4) + ',owed,' + V(3) + ',IF(AND(late>30,owed>B5/2),"WATCH","OK"))',
+          '=IF(OR(' + V(4) + '<=30,' + V(3) + '<=B5/2),"OK","WATCH")',
+          '=IF(AND(' + V(4) + '>30,' + V(3) + '/B5>0.5),"WATCH","OK")'
+        ],
+        exactCase: true,
+        rowReply: 'Row {row} says {got}, but {key} should be {want}. Find {key} by name in the loan book and check its days late and outstanding.', keyCol: 'A',
+        replies: {
+          pass: ['Received. Six on WATCH, eight OK. The committee has it 🙏', 'CV Kasuari Sentral is only 35 days late, but owes more than half its Q4 sales. CV Kutilang Abadi is 45 days late, but owes about a third, so it stays OK. Both tests matter.'],
+          wrong: '',
+          typed: 'The statuses are typed in, not formulas 😅 When the bank updates the loan book, they will be wrong. One formula in C5, filled down.'
+        },
+        note: { fn: 'Linked workbooks in real Excel', what: 'Both files open, a lookup that clicks into the other workbook, IF(AND(...)) on top. Save the file that holds the formula.', shape: SOLUTION },
+        hints: [
+          'Two facts from the loan book for the distributor in A5: days late and outstanding. Then compare outstanding with half of B5.',
+          'Look up A5 in the loan book\'s B5:G18 by clicking into it: outstanding is column 3, days late column 4. Put both tests inside AND, inside IF.',
+          'It looks like =IF(AND(' + V(4) + '>30,' + V(3) + '>B5/2),"WATCH","OK").'
+        ]
+      }), { kind: 'excel' });
+    })()
+  );
+  /* CH11-REQUESTS */
+
   /* Ranks along the way. Chapter 1 ends with a promotion to Analyst. */
   const RANKS = [
     { at: 0, title: 'Junior Analyst' },
@@ -1743,7 +2419,7 @@
     { at: 70, title: 'Lead Analyst' }
   ];
 
-  const CHAPTERS = [{ n: 1, title: 'Your first week', ids: LIST.filter((m) => !m.chapter).map((m) => m.id) }, { n: 2, title: 'Bank Kenari', ids: LIST.filter((m) => m.chapter === 2).map((m) => m.id) }, { n: 3, title: 'Lookups', ids: LIST.filter((m) => m.chapter === 3).map((m) => m.id) }, { n: 4, title: 'Text and dates', ids: LIST.filter((m) => m.chapter === 4).map((m) => m.id) }, { n: 5, title: 'Dynamic arrays', ids: LIST.filter((m) => m.chapter === 5).map((m) => m.id) }, { n: 6, title: 'Reporting', ids: LIST.filter((m) => m.chapter === 6).map((m) => m.id) }, { n: 7, title: 'Power Query', ids: LIST.filter((m) => m.chapter === 7).map((m) => m.id) }, { n: 8, title: 'What-if and loans', ids: LIST.filter((m) => m.chapter === 8).map((m) => m.id) }, { n: 9, title: 'Macros', ids: LIST.filter((m) => m.chapter === 9).map((m) => m.id) }, { n: 10, title: 'The early-warning report', ids: LIST.filter((m) => m.chapter === 10).map((m) => m.id) }];
+  const CHAPTERS = [{ n: 1, title: 'Your first week', ids: LIST.filter((m) => !m.chapter).map((m) => m.id) }, { n: 2, title: 'Bank Kenari', ids: LIST.filter((m) => m.chapter === 2).map((m) => m.id) }, { n: 3, title: 'Lookups', ids: LIST.filter((m) => m.chapter === 3).map((m) => m.id) }, { n: 4, title: 'Text and dates', ids: LIST.filter((m) => m.chapter === 4).map((m) => m.id) }, { n: 5, title: 'Dynamic arrays', ids: LIST.filter((m) => m.chapter === 5).map((m) => m.id) }, { n: 6, title: 'Reporting', ids: LIST.filter((m) => m.chapter === 6).map((m) => m.id) }, { n: 7, title: 'Power Query', ids: LIST.filter((m) => m.chapter === 7).map((m) => m.id) }, { n: 8, title: 'What-if and loans', ids: LIST.filter((m) => m.chapter === 8).map((m) => m.id) }, { n: 9, title: 'Macros', ids: LIST.filter((m) => m.chapter === 9).map((m) => m.id) }, { n: 10, title: 'The early-warning report', ids: LIST.filter((m) => m.chapter === 10).map((m) => m.id) }, { n: 11, title: 'Real cases', ids: LIST.filter((m) => m.chapter === 11).map((m) => m.id) }];
   const DATA_TOTALS = Object.fromEntries([...new Set(DATA.map((d) => d.Distributor))].map((k) => [k, DATA.filter((d) => d.Distributor === k).reduce((a, d) => a + d.Net, 0)]));
-  return { DATA_TOTALS, LIST, RANKS, CHAPTERS, target, other, ALT_D5, FIRST, LAST, rows, FAC, B_FIRST, B_LAST };
+  return { DATA_TOTALS, LIST, RANKS, CHAPTERS, target, other, ALT_D5, FIRST, LAST, rows, FAC, B_FIRST, B_LAST, SHEET11, real, range11, table11, sheetRef };
 });

@@ -6,7 +6,9 @@ Learn Excel free, from the first SUM to PivotTables, Power Query, loans and macr
 
 You are the new analyst at Rasa Kenari, a made-up food company, and later at Bank Kenari, the made-up bank that lends to its distributors. Colleagues send requests in Kicau, a work chat. You answer each one on a practice sheet that works like Excel, and Kicau checks your formula on a second sheet with different numbers, so a typed answer or a frozen reference does not pass.
 
-- 87 requests in 10 chapters: sums and averages, IF and grades, lookups, text and dates, dynamic arrays, reports (PivotTables, charts, conditional formatting, data validation), Power Query, loans and what-if, macros, and a final early-warning report.
+- 97 requests in 11 chapters: sums and averages, IF and grades, lookups, text and dates, dynamic arrays, reports (PivotTables, charts, conditional formatting, data validation), Power Query, loans and what-if, macros, an early-warning report, and real cases that reach across several workbooks (VLOOKUP inside SUMIF, nested IF with AND and OR, INDEX with two MATCHes, fees with a floor and a cap).
+- Several workbooks open at once, as at work: tap another file's tab and Kicau writes the reference the way Excel does, `[master_produk.xlsx]Produk!$A$5:$D$16`.
+- A finished request stays on screen for review until you press Continue. On a laptop the sheet can be maximized, with a small chat window over it.
 - Each chapter ends with one request done in real Excel: download the workbook, do the work, upload it back, and Kicau checks the file.
 - Works on a phone and a computer. No account. Your name, answers and progress stay in your browser.
 
@@ -31,7 +33,7 @@ node --no-warnings scripts/verify.mjs
 node --no-warnings scripts/dev/kicau-e2e.mjs
 ```
 
-The first checks the data, the answer checker and the macro stepper. The second plays every request on a phone and a laptop in a private Chrome, on port 8766.
+The first checks the data, the answer checker, the macro stepper, and every request's answer battery on the real engine in Node (`scripts/dev/check-missions.mjs`). The second plays every request on a phone and a laptop in a private Chrome, on port 8766. To try a new Chapter 11 request before adding it: `node --no-warnings scripts/dev/try-mission.mjs path/to/request.js --show`.
 
 ## What is where
 

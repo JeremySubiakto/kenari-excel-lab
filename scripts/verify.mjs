@@ -135,5 +135,17 @@ for (const f of copyFiles) {
   ok(!hit, 'no discouraging word in ' + f, hit && hit[0]);
 }
 
+/* ---------- Several workbooks: Excel's [file]Sheet! form, rewritten for the engine ---------- */
+const { toEngine } = await import(path.join(ROOT, 'assets/js/core/engine.js'));
+ok(toEngine('=VLOOKUP(C5,[master_produk.xlsx]Produk!$A$5:$D$16,4,FALSE)') === "=VLOOKUP(C5,'master_produk.xlsx|Produk'!$A$5:$D$16,4,FALSE)", 'an external reference is rewritten for the engine');
+ok(toEngine("='[rate card.xlsx]Tarif'!B5") === "='rate card.xlsx|Tarif'!B5", 'a quoted external reference is rewritten');
+ok(toEngine('=Diskon!B5+SUM(A1:A3)') === '=Diskon!B5+SUM(A1:A3)', 'a same-workbook sheet reference is left alone');
+ok(Check.shiftRows('=VLOOKUP(C5,[master_produk.xlsx]Produk!$A$5:$D$16,4,FALSE)+Diskon!B5', 2) === '=VLOOKUP(C7,[master_produk.xlsx]Produk!$A$5:$D$16,4,FALSE)+Diskon!B7', 'filling down moves relative references on other sheets and keeps pinned ones');
+
+/* ---------- The answer battery, run on the real engine in Node ---------- */
+const battery = require('node:child_process').spawnSync(process.execPath, ['--no-warnings', path.join(ROOT, 'scripts/dev/check-missions.mjs')], { encoding: 'utf8' });
+const last = (battery.stdout || '').trim().split('\n').pop();
+ok(battery.status === 0, 'every formula request passes the answer battery: ' + last, (battery.stdout || '').split('\n').filter((l) => l.startsWith('FAIL')).slice(0, 5));
+
 console.log(`${passes} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);

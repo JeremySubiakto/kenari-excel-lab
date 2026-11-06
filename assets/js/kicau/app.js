@@ -152,7 +152,7 @@ function side() {
     ${ST.promoted ? '' : `<h2 class="sec">Bank Kenari</h2>${bankLockRow()}`}</div></aside>`;
 }
 function shell(on, inner) {
-  if (LAP.matches) return `<div class="lap">${rail(on)}${side()}<main class="main">${inner}</main></div>`;
+  if (LAP.matches) return `<div class="lap${UI.max && on === 'chat' ? ' max' : ''}">${rail(on)}${side()}<main class="main">${inner}</main></div>`;
   return `<div class="ph">${inner}${on === 'chat' ? '' : tabs(on)}</div>`;
 }
 function ring(n, of, cls) {
@@ -209,17 +209,132 @@ function renderChat(p) {
   ST.opened[p] = true;
   save();
   document.querySelectorAll('.toast').forEach((t) => { if (t.getAttribute('href') === '#chat-' + p) t.remove(); });
-  const act = activeFor(p);
+  /* After a request closes, its sheet stays up for review until the learner presses Continue. */
+  const held = ST.hold ? LIST.find((x) => x.id === ST.hold && x.from === p) : null;
+  const act = held ? null : activeFor(p);
   if (act && !MST(act.id).started) UI.dock = 'min';
   else if (UI.dock === 'min') UI.dock = 'open';
   const head =`<header class="chathd">${LAP.matches ? '' : `<a class="icb" href="#desk" aria-label="Back to chats">${I('back')}</a>`}${avatar(p, 40, { on: true })}<div class="who"><b>${esc(P.name)}</b><small class="${UI.busy[p] ? 'live' : ''}" id="whostate">${UI.busy[p] ? 'typing…' : esc(P.role + ', ' + P.org)}</small></div></header>`;
   const pin = act ? `<button class="pin" id="pin">${I('spark')}<span class="txt"><b>Request ${esc(act.id)}</b> ${strip(act.ask)}</span><span class="tag due">Due ${esc(act.due)}</span></button>` : '';
-  const inner = `<div class="chatwrap"><section class="chatcol">${head}${pin}<div class="wall" id="wall" role="log" aria-label="Messages"></div>${!act && LIST.some((m) => m.from === p) && !LAP.matches ? `<div class="foot" style="padding:10px 12px calc(12px + env(safe-area-inset-bottom));background:var(--surface);border-top:1px solid var(--line)"><a class="btn wide" href="${current() ? '#chat-' + current().from : '#desk'}">${current() ? `Next: ${esc(PEOPLE[current().from].short)}` : 'Back to chats'}</a></div>` : ''}</section>${act ? dockHTML(act) : LAP.matches ? idlePanel(p) : ''}</div>`;
+  const inner = `<div class="chatwrap"><section class="chatcol">${head}${pin}<div class="wall" id="wall" role="log" aria-label="Messages"></div>${!act && !held && LIST.some((m) => m.from === p) && !LAP.matches ? `<div class="foot" style="padding:10px 12px calc(12px + env(safe-area-inset-bottom));background:var(--surface);border-top:1px solid var(--line)"><a class="btn wide" href="${current() ? '#chat-' + current().from : '#desk'}">${current() ? `Next: ${esc(PEOPLE[current().from].short)}` : 'Back to chats'}</a></div>` : ''}</section>${act ? dockHTML(act) : held ? reviewHTML(held) : LAP.matches ? idlePanel(p) : ''}</div>`;
   app.innerHTML = shell('chat', inner);
   wireSide();
   if ($('#pin')) $('#pin').onclick = (e) => e.currentTarget.classList.toggle('open');
   renderWall();
   if (act) { wireDock(act); if (!LAP.matches) setDock(UI.dock); if (!MST(act.id).started) startMission(act); }
+  if (held) wireReview(held);
+  wireMax();
+  mountMini(p);
+}
+/** The line under a file card: how many rows, and the other workbooks it comes with. */
+function fileNote(m) {
+  const rows = m.first && m.last ? m.last - m.first + 1 : MS.rows.length;
+  const more = m.books && m.books.length > 1 ? ' · with ' + m.books.slice(1).map((b) => b.file).join(', ') : '';
+  return rows + ' rows' + more;
+}
+/** Whether a Continue press is waiting, and where it leads. */
+function continueLabel() {
+  const n = current();
+  if (!n) return LIST.every(isClosed) ? 'Continue' : 'Back to chats';
+  if (ST.promoDue) return 'Continue';
+  const h = ST.hold && LIST.find((x) => x.id === ST.hold);
+  return h && n.from === h.from ? 'Continue: next request' : 'Continue to ' + PEOPLE[n.from].short;
+}
+/** The learner pressed Continue: only now does Kicau move on. */
+function cont() {
+  ST.hold = null;
+  save();
+  const n = current();
+  if (ST.promoDue) { ST.promoDue = false; save(); showPromo(); return; }
+  if (!n) { if (LIST.every(isClosed)) showFinale(); else location.hash = '#desk'; return; }
+  if (location.hash === '#chat-' + n.from) renderChat(n.from); else location.hash = '#chat-' + n.from;
+}
+/** The closed request's sheet, read-only, with the formula that solved it and a Continue button. */
+function reviewHTML(m) {
+  const st = MST(m.id);
+  const formulaKind = m.kind === 'formula' || (m.kind === 'excel' && !m.pivotCheck && !m.wantValues);
+  const body = formulaKind
+    ? `<div class="fbar ro"><span class="nbox">${esc(m.answerCell)}</span><span class="fxi" aria-hidden="true">fx</span><div class="fxro" title="${esc(st.solved || m.solution)}">${esc(st.solved || m.solution)}</div></div><div class="gw" id="gw">${sheetGrid(m, true)}</div>${sheetTabsHTML(m)}`
+    : `<div class="page"><div class="empty">${I('check')} Request ${esc(m.id)} is closed. Take your time, then continue.</div></div>`;
+  return `<section class="dock open review" id="dock" aria-label="Your finished sheet">
+    <div class="shd">${bookTabsHTML(m, '· sent to ' + PEOPLE[m.from].short)}${maxButton()}</div>
+    ${body}
+    <div class="comp"><small class="rv">Review your formula, then continue.</small><span class="sp"></span><button class="send" data-continue>${I('send')}<span>${esc(continueLabel())}</span></button></div></section>`;
+}
+function wireReview(m) {
+  document.querySelectorAll('#dock [data-continue]').forEach((b) => { b.onclick = cont; });
+  wireTabs(m, true);
+}
+/* ---------- Maximize the sheet on a laptop ---------- */
+const maxButton = () => (LAP.matches ? `<button class="icb" id="dockmax" aria-label="${UI.max ? 'Show the chat again' : 'Maximize the workbook'}" title="${UI.max ? 'Show the chat' : 'Maximize the workbook'}">${I(UI.max ? 'collapse' : 'expand')}</button>` : '');
+function wireMax() {
+  const b = $('#dockmax');
+  if (!b) return;
+  b.onclick = () => {
+    UI.max = !UI.max;
+    const lap = document.querySelector('.lap');
+    if (lap) lap.classList.toggle('max', UI.max);
+    b.classList.remove('unread');
+    b.innerHTML = I(UI.max ? 'collapse' : 'expand');
+    b.setAttribute('aria-label', UI.max ? 'Show the chat again' : 'Maximize the workbook');
+    b.title = UI.max ? 'Show the chat' : 'Maximize the workbook';
+    if (!UI.max) { UI.miniOpen = false; const mi = $('#mini'); if (mi) mi.classList.remove('open', 'unread'); }
+  };
+}
+/*
+ * The small chat window. When the sheet is expanded (Maximize on a laptop, full screen on a phone) the chat is
+ * out of sight, so a "Chat with ..." button floats over the sheet. Closed, it shows the newest line and a red dot
+ * when something new arrives. Open, it is a small window: the request pinned on top, then the latest messages.
+ */
+function mountMini(p) {
+  const d = $('#dock');
+  if (!d || !PEOPLE[p] || $('#mini')) return;
+  const el = document.createElement('div');
+  el.className = 'mini' + (UI.miniOpen ? ' open' : '');
+  el.id = 'mini';
+  el.innerHTML = `<button class="mini-pill" id="minipill" aria-expanded="${!!UI.miniOpen}" aria-controls="miniwin">${avatar(p, 28)}<span class="mp-t" id="minitext">Chat with ${esc(PEOPLE[p].short)}</span><i class="dot" aria-hidden="true"></i></button>
+    <div class="mini-win" id="miniwin" role="dialog" aria-label="Chat with ${esc(PEOPLE[p].name)}"><div class="mini-hd">${avatar(p, 28)}<b>${esc(PEOPLE[p].name)}</b><span class="sp"></span><button class="icb" id="minifull" title="Show the full chat" aria-label="Show the full chat">${I('collapse')}</button><button class="icb" id="miniclose" aria-label="Close the small chat">×</button></div><div class="mini-ask" id="miniask"></div><div class="mini-log" id="minilog" role="log" aria-label="Latest messages"></div></div>`;
+  d.appendChild(el);
+  const setOpen = (on) => { UI.miniOpen = on; el.classList.toggle('open', on); $('#minipill').setAttribute('aria-expanded', String(on)); if (on) { el.classList.remove('unread'); $('#minipill').innerHTML = `${avatar(p, 28)}<span class="mp-t" id="minitext">Chat with ${esc(PEOPLE[p].short)}</span><i class="dot" aria-hidden="true"></i>`; const b = $('#dockmax'); if (b) b.classList.remove('unread'); renderMini(); } };
+  $('#minipill').onclick = () => setOpen(true);
+  $('#miniclose').onclick = () => setOpen(false);
+  $('#minifull').onclick = () => { setOpen(false); if (LAP.matches) { const b = $('#dockmax'); if (b && UI.max) b.click(); } else setDock('open'); };
+  renderMini();
+}
+/** One message as a short line for the small window. */
+function miniLine(e) {
+  if (e.k === 'closed') return `<p class="mm sys">${I('check')} Request ${esc(e.mission)} closed</p>`;
+  const me = e.who === 'me';
+  const who = me ? 'You' : e.who && PEOPLE[e.who] ? PEOPLE[e.who].short : '';
+  let t;
+  if (e.k === 'answer') t = `<code>${esc(e.formula)}</code>`;
+  else if (e.k === 'upload') t = esc(e.name + ', ' + e.summary);
+  else if (e.k === 'pick') t = esc(fmt(e.value) + ' distributors need review');
+  else if (e.k === 'nudge') t = `<i>${esc(e.title)}.</i> ${esc(e.plain || '')}`;
+  else if (e.k === 'lesson') { const m = LIST.find((x) => x.id === e.mission); t = m && m.lesson ? '<i>Lesson:</i> ' + esc(strip(m.lesson.idea)) : ''; }
+  else if (e.k === 'text' || e.k === 'hint' || e.k === 'sari') t = esc(strip(fill(e.html || '')));
+  else return '';
+  return t ? `<p class="mm${me ? ' me' : ''}"><b>${esc(who)}</b> ${t}</p>` : '';
+}
+function renderMini() {
+  const box = $('#minilog');
+  if (!box || !UI.person) return;
+  const m = activeFor(UI.person) || (ST.hold ? LIST.find((x) => x.id === ST.hold) : null);
+  $('#miniask').innerHTML = m ? `<b>Request ${esc(m.id)}</b> ${strip(m.ask)}` : '';
+  box.innerHTML = logOf(UI.person).slice(-12).map(miniLine).join('') + (UI.busy[UI.person] ? `<p class="mm"><span class="typing"><span class="dots"><i></i><i></i><i></i></span></span></p>` : '');
+  box.scrollTop = box.scrollHeight;
+}
+/** A new line from a colleague: the closed small chat shows it with a red dot. */
+function miniNew(e) {
+  const el = $('#mini');
+  if (!el || !e.who || e.who === 'me') return;
+  const expanded = (LAP.matches && UI.max) || (!LAP.matches && UI.dock === 'full');
+  if (!expanded || UI.miniOpen) return;
+  el.classList.add('unread');
+  const pill = $('#minipill');
+  if (pill) pill.innerHTML = `${avatar(e.who, 28)}<span class="mp-t" id="minitext">${esc(PEOPLE[e.who].short + ': ' + strip(fill(e.html || e.title || 'Lesson')))}</span><i class="dot" aria-hidden="true"></i>`;
+  const b = $('#dockmax');
+  if (b) b.classList.add('unread');
 }
 function idlePanel(p) {
   const last = [...LIST].reverse().find((m) => m.from === p && isClosed(m));
@@ -237,6 +352,7 @@ async function play(p, entries, gap) {
     e.t = e.t || clock();
     logOf(p).push(e);
     save();
+    if (UI.person === p) miniNew(e);
     say((e.who && e.who !== 'me' ? PEOPLE[e.who].short + ': ' : '') + (e.html || e.title || ''));
     renderWall();
     await wait(gap || 160);
@@ -246,6 +362,9 @@ async function play(p, entries, gap) {
   renderWall();
 }
 async function startMission(m) {
+  if (ST.hold) { ST.hold = null; save(); }
+  /* A new request is read in the chat, so a maximized sheet steps back. */
+  if (UI.max) { UI.max = false; const lap = document.querySelector('.lap'); if (lap) lap.classList.remove('max'); const b = $('#dockmax'); if (b) b.innerHTML = I('expand'); }
   const st = MST(m.id);
   st.started = true;
   markDay();
@@ -269,7 +388,7 @@ function entryHTML(e, i, log) {
     }
     case 'file': {
       const macro = m.kind === 'macro';
-      return `<div class="b them cont"><button class="file" data-opendock>${`<span class="xl${macro ? ' m' : ''}">X</span>`}<span><b>${esc(m.file)}</b><small>${macro ? '6 distributors, 1 macro' : MS.rows.length + ' rows, October'}</small></span><span class="open">Open</span></button><div class="t">${esc(e.t)}</div></div>`;
+      return `<div class="b them cont"><button class="file" data-opendock>${`<span class="xl${macro ? ' m' : ''}">X</span>`}<span><b>${esc(m.file)}</b><small>${macro ? '6 distributors, 1 macro' : fileNote(m)}</small></span><span class="open">Open</span></button><div class="t">${esc(e.t)}</div></div>`;
     }
     case 'lesson': {
       const L = m.lesson;
@@ -310,7 +429,7 @@ function closedHTML(e, m) {
   if (m.kind === 'formula') tags.push('<span class="tag">Checked on 2 sheets</span>');
   tags.push(`<span class="tag">${e.coffees ? `${e.coffees} ${e.coffees === 1 ? 'coffee' : 'coffees'} with Sari` : 'No coffee needed'}</span>`);
   if (e.attempts === 1) tags.push(`<span class="tag ok">${I('bolt')}First try</span>`);
-  const btn = nextM ? (isClosed(nextM) ? '' : `<a class="btn sm" href="#chat-${nextM.from}">Next: ${esc(PEOPLE[nextM.from].short)}</a>`) : (ST.promoted ? `<button class="btn sm" data-promo>${LIST.every(isClosed) ? 'See your graduation' : 'See your promotion'}</button>` : '');
+  const btn = ST.hold === m.id ? `<button class="btn sm" data-continue>${esc(continueLabel())}</button>` : '';
   return `<div class="done">${fresh ? confetti(24) : ''}<div class="ck">${I('check')}</div><h3>Request closed</h3><p>${esc(PEOPLE[m.from].short)} has what they needed.</p>
     <div class="ladder">${Array.from({ length: segs }, (_, i) => `<i class="${i < filled - 1 ? 'on' : i === filled - 1 ? (fresh ? 'new' : 'on') : ''}"></i>`).join('')}</div>
     <div class="ladder-l"><span>${esc(rk.title)}</span><span>${n} of ${nx ? nx.at : n}</span><span>${esc(nx ? nx.title : '')}</span></div>
@@ -336,7 +455,8 @@ function renderWall(typing) {
   w.querySelectorAll('[data-opendock]').forEach((b) => { b.onclick = () => { setDock(LAP.matches ? 'open' : 'open'); const g = $('#gw'); if (g) g.scrollTop = 0; }; });
   w.querySelectorAll('[data-fix]').forEach((b) => { b.onclick = () => { setFormula(b.dataset.fix); }; });
   w.querySelectorAll('[data-pick]').forEach((b) => { b.onclick = () => pick(+b.dataset.pick); });
-  w.querySelectorAll('[data-promo]').forEach((b) => { b.onclick = () => (LIST.every(isClosed) ? showFinale() : showPromo()); });
+  w.querySelectorAll('[data-continue]').forEach((b) => { b.onclick = cont; });
+  renderMini();
 }
 
 /* ---------- The workbook dock ---------- */
@@ -380,6 +500,80 @@ function gridHTML(m, solved) {
   }
   return `<table class="gx${m.cols ? ' wide' : ''}" aria-label="${esc(m.file)}"><thead>${head}</thead><tbody>${body}</tbody></table>`;
 }
+/* ---------- Several workbooks ----------
+   A request can have more than one workbook open (m.books, Chapter 11). Each book has sheets; the request's own
+   sheet is the first sheet of the first book. The learner switches with the workbook tabs in the title bar and
+   the sheet tabs under the grid, and tapping a cell there writes the reference as Excel does:
+   Diskon!A5 for a sheet of the same file, [master_produk.xlsx]Produk!$A$5 for another file. */
+const SHEETS_K = Symbol.for('kenari.sheets');
+const booksOf = (m) => m.books || [{ file: m.file, sheets: [{ name: m.sheetName || 'Sheet1', cols: m.cols || COLS, main: true, prefix: '' }] }];
+const viewOf = (m) => { if (!UI.view || UI.view.id !== m.id) UI.view = { id: m.id, b: 0, s: 0 }; return UI.view; };
+const viewSheet = (m) => { const v = viewOf(m), B = booksOf(m), b = B[v.b] || B[0]; return { book: b, sheet: b.sheets[v.s] || b.sheets[0] }; };
+const engName = (m, file, sheet) => (file === m.file ? sheet : file + '|' + sheet);
+function sheetCells(m, file, name, variant) {
+  const cells = m.variantCells ? m.variantCells[variant || 'base'] : m.cells;
+  const s = (cells[SHEETS_K] || []).find((x) => x.name === engName(m, file, name));
+  return s ? s.cells : {};
+}
+/** The grid for whatever sheet is in view: the request's own, or one of the other open sheets. */
+function sheetGrid(m, solved) {
+  const { book, sheet } = viewSheet(m);
+  if (sheet.main) return gridHTML(m, solved);
+  const c = sheetCells(m, book.file, sheet.name);
+  const head = `<tr><th class="cn" aria-hidden="true"></th>${sheet.cols.map((col) => `<th scope="col"><button type="button" data-col="${col}" aria-label="Column ${col}">${col}</button></th>`).join('')}</tr>`;
+  let body = '';
+  for (let r = 1; r <= sheet.last; r++) {
+    body += `<tr><th scope="row">${r}</th>`;
+    for (const col of sheet.cols) {
+      const ref = col + r;
+      let v = c[ref], cls = '';
+      if (r === 4) cls = 'hd';
+      else if (r >= sheet.first && (sheet.dateCols || []).includes(col) && typeof v === 'number') v = dateText(v);
+      else if (typeof v === 'number') { cls = 'n'; v = fmt(v); }
+      body += `<td data-ref="${ref}" class="${cls}"${typeof v === 'string' && v.length > 16 ? ` title="${esc(v)}"` : ''}>${v === undefined ? '' : esc(v)}</td>`;
+    }
+    body += '</tr>';
+  }
+  return `<table class="gx" aria-label="${esc(book.file + ', sheet ' + sheet.name)}"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
+/** The title bar: one tab per open workbook, or the file name when there is only one. */
+function bookTabsHTML(m, sub) {
+  const B = booksOf(m), v = viewOf(m);
+  if (B.length < 2) return `<span class="xl">X</span><span class="nm">${esc(m.file)}</span><small>${esc(sub)}</small>`;
+  return `<div class="bktabs" id="bktabs" role="tablist" aria-label="Open workbooks">${B.map((b, i) => `<button class="bk${i === v.b ? ' on' : ''}" role="tab" aria-selected="${i === v.b}" data-book="${i}"><span class="xl">X</span>${esc(b.file)}</button>`).join('')}</div>`;
+}
+/** The sheet tabs under the grid, for the workbook in view. */
+function sheetTabsHTML(m) {
+  if (!m.books) return SHEET_TABS;
+  const { book, sheet } = viewSheet(m);
+  return `<div class="sheettabs" id="sheettabs" role="tablist" aria-label="Sheets in ${esc(book.file)}"><span class="arr" aria-hidden="true">◀ ▶</span>${book.sheets.map((s, i) => `<button class="st${s === sheet ? ' on' : ''}" role="tab" aria-selected="${s === sheet}" data-sheet="${i}">${esc(s.name)}</button>`).join('')}</div>`;
+}
+/** Switch workbook or sheet without touching the formula being typed. */
+function wireTabs(m, solved) {
+  const d = $('#dock');
+  if (!d || !m.books) return;
+  d.addEventListener('click', (e) => {
+    const bk = e.target.closest('[data-book]'), sh = e.target.closest('[data-sheet]');
+    if (!bk && !sh) return;
+    const v = viewOf(m);
+    if (bk) { v.b = +bk.dataset.book; v.s = 0; } else v.s = +sh.dataset.sheet;
+    const gw = $('#gw');
+    if (gw) { gw.innerHTML = sheetGrid(m, solved); gw.scrollTop = 0; gw.scrollLeft = 0; }
+    const t1 = $('#bktabs'), t2 = $('#sheettabs');
+    if (t1) t1.outerHTML = bookTabsHTML(m, '');
+    if (t2) t2.outerHTML = sheetTabsHTML(m);
+    if (!solved) paint();
+    say(viewSheet(m).book.file + ', sheet ' + viewSheet(m).sheet.name);
+  });
+}
+/** A cell or range in the sheet in view, written from the request's own sheet the way Excel writes it. */
+function refFromView(m, a, b, colRange) {
+  const { book, sheet } = viewSheet(m);
+  if (sheet.main) return colRange || (b ? a + ':' + b : a);
+  const ext = book.file !== m.file;
+  const pin = (r) => (ext ? r.replace(/^([A-Z]+)(\d+)$/, '$$$1$$$2') : r);
+  return sheet.prefix + (colRange ? pin(colRange[0]) + ':' + pin(colRange[1]) : pin(a) + (b ? ':' + pin(b) : ''));
+}
 function dockHTML(m) {
   if (m.kind === 'macro') return macroDockHTML(m);
   if (m.kind === 'excel') return excelDockHTML(m);
@@ -390,11 +584,11 @@ function dockHTML(m) {
   const left = coffeesLeft();
   return `<section class="dock ${LAP.matches ? 'open' : UI.dock}" id="dock" aria-label="Workbook">
     <button class="grab" id="grab" aria-label="Make the workbook bigger or smaller"></button>
-    <div class="shd"><span class="xl">X</span><span class="nm">${esc(m.file)}</span><small>· from ${esc(PEOPLE[m.from].short)}</small>${dlButton()}${LAP.matches ? '' : `<button class="icb" id="dockbig" aria-label="Full screen sheet">${I(UI.dock === 'full' ? 'collapse' : 'expand')}</button>`}</div>
+    <div class="shd">${bookTabsHTML(m, '· from ' + PEOPLE[m.from].short)}${dlButton()}${LAP.matches ? maxButton() : `<button class="icb" id="dockbig" aria-label="Full screen sheet">${I(UI.dock === 'full' ? 'collapse' : 'expand')}</button>`}</div>
     <div class="fbar"><span class="nbox" title="Name box: the cell your answer goes in">${esc(m.answerCell)}</span><span class="fxi" aria-hidden="true">fx</span><div class="fxbox"><div class="paint" id="paint" aria-hidden="true"></div><input id="fx" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Formula for ${esc(m.answerCell)}" ${coarse ? 'inputmode="none"' : ''}></div></div>
     ${m.spill ? `<div class="fxlabel">Type one formula in <b>${esc(m.answerCell)}</b>. Its answer spills down and across by itself.</div>` : m.fill ? `<div class="fxlabel">Type it in <b>${esc(m.answerCell)}</b>. When you send, Kicau copies it down to <b>${esc(m.fill.col + m.fill.last)}</b>.</div>` : LAP.matches ? `<div class="fxlabel">Answer cell <b>${esc(m.answerCell)}</b> Tap cells, or drag across them. F4 fixes a reference with $.</div>` : ''}
-    <div class="gw" id="gw">${gridHTML(m)}</div>
-    ${SHEET_TABS}
+    <div class="gw" id="gw">${sheetGrid(m)}</div>
+    ${sheetTabsHTML(m)}
     ${coarse ? '' : `<div class="chips" id="chips"><small>Tap a cell, or</small>${chipBtns}</div>`}
     ${keys}
     <div class="engmsg" id="engmsg" ${ENG.api ? 'hidden' : ''}>${ENG.failed ? 'The practice sheet did not load. Reload to try again.' : 'Warming up the practice sheet…'}</div>
@@ -418,14 +612,21 @@ function setDock(state) {
 function refsIn(f) {
   const out = [];
   const plain = f.replace(/"[^"]*"?/g, (s) => ' '.repeat(s.length));
-  const re = /\$?([A-Z]{1,2})\$?(\d+)(?::\$?([A-Z]{1,2})\$?(\d+))?|\b([A-Z]):([A-Z])\b/g;
+  const re = /((?:'[^']+'|\[[^\]]+\][A-Za-z0-9_.]+|[A-Za-z_][A-Za-z0-9_.]*)!)?(?:\$?([A-Z]{1,2})\$?(\d+)(?::\$?([A-Z]{1,2})\$?(\d+))?|\b([A-Z]):([A-Z])\b)/g;
   let m;
   while ((m = re.exec(plain))) {
-    if (m[5]) out.push({ at: m.index, len: m[0].length, c1: m[5], c2: m[6], r1: 1, r2: 9999 });
+    /* Which sheet: none means the request's own; [book]Sheet another workbook; Sheet the same workbook. */
+    let book = null, sheet = null;
+    if (m[1]) {
+      const q = m[1].slice(0, -1).replace(/^'|'$/g, '');
+      const b = /^\[([^\]]+)\](.+)$/.exec(q);
+      if (b) { book = b[1]; sheet = b[2]; } else sheet = q;
+    }
+    if (m[6]) out.push({ at: m.index, len: m[0].length, c1: m[6], c2: m[7], r1: 1, r2: 9999, book, sheet });
     else {
       const before = plain[m.index - 1];
-      if (before && /[A-Za-z]/.test(before)) continue;
-      out.push({ at: m.index, len: m[0].length, c1: m[1], c2: m[3] || m[1], r1: +m[2], r2: +(m[4] || m[2]) });
+      if (!m[1] && before && /[A-Za-z]/.test(before)) continue;
+      out.push({ at: m.index, len: m[0].length, c1: m[2], c2: m[4] || m[2], r1: +m[3], r2: +(m[5] || m[3]), book, sheet });
     }
   }
   return out;
@@ -442,7 +643,15 @@ function paint() {
   p.scrollLeft = inp.scrollLeft;
   /* Tint the cells each reference points at, in the same color, as Excel does while you edit. */
   document.querySelectorAll('#gw td').forEach((td) => td.classList.remove('k0', 'k1', 'k2', 'k3', 'kt', 'kb', 'one'));
+  const cm = current();
+  const inView = (r) => {
+    if (!cm || !cm.books) return !r.sheet;
+    const { book, sheet } = viewSheet(cm);
+    const file = r.book || cm.file, name = r.sheet || cm.sheetName;
+    return file === book.file && name === sheet.name;
+  };
   refs.forEach((r, i) => {
+    if (!inView(r)) return;
     const a = Math.min(r.c1.charCodeAt(0), r.c2.charCodeAt(0)), z = Math.max(r.c1.charCodeAt(0), r.c2.charCodeAt(0));
     const top = Math.min(r.r1, r.r2), bot = Math.min(Math.max(r.r1, r.r2), 60);
     for (let c = a; c <= z; c++) for (let row = top; row <= bot; row++) {
@@ -512,14 +721,15 @@ function wireDock(m) {
   const gw = $('#gw');
   let from = null, dragged = false;
   gw.addEventListener('mousedown', (e) => { e.preventDefault(); const td = e.target.closest('td[data-ref]'); from = td ? td.dataset.ref : null; dragged = false; });
-  gw.addEventListener('mouseup', (e) => { const td = e.target.closest('td[data-ref]'); if (from && td && td.dataset.ref !== from) { dragged = true; insert(from + ':' + td.dataset.ref); } from = null; });
+  gw.addEventListener('mouseup', (e) => { const td = e.target.closest('td[data-ref]'); if (from && td && td.dataset.ref !== from) { dragged = true; insert(refFromView(m, from, td.dataset.ref)); } from = null; });
   gw.addEventListener('click', (e) => {
     if (dragged) { dragged = false; return; }
+    const { sheet } = viewSheet(m);
     const col = e.target.closest('[data-col]');
-    if (col) { insert(m.colRange[col.dataset.col]); return; }
+    if (col) { const c = col.dataset.col; insert(sheet.main ? m.colRange[c] : refFromView(m, null, null, [c + sheet.first, c + sheet.last])); return; }
     const td = e.target.closest('td[data-ref]');
-    if (!td || td.dataset.ref === m.answerCell) return;
-    insert(td.dataset.ref);
+    if (!td || (sheet.main && td.dataset.ref === m.answerCell)) return;
+    insert(refFromView(m, td.dataset.ref));
     td.classList.add('flash');
     setTimeout(() => td.classList.remove('flash'), 520);
   });
@@ -553,6 +763,7 @@ function wireDock(m) {
   const big = $('#dockbig');
   if (big) big.onclick = () => setDock(UI.dock === 'full' ? 'open' : 'full');
   inp.addEventListener('focus', () => { if (!LAP.matches && UI.dock === 'min') setDock('open'); });
+  wireTabs(m, false);
 }
 
 /* ---------- Sending an answer ---------- */
@@ -631,16 +842,13 @@ async function closeMission(m) {
     ST.logs.citra = [{ k: 'text', who: 'citra', html: 'Halo {name}! Citra, Head of Collection at Bank Kenari 👋', t: clock() }, { k: 'text', who: 'citra', html: 'Bu Lestari told me you read macros now. Selamat on Analyst!', t: clock() }, { k: 'text', who: 'citra', html: 'Our collection files start in Chapter 2. I will send the first one soon 😉', t: clock() }];
     ST.logs.dimas = [{ k: 'text', who: 'dimas', html: 'Selamat, Analyst! Dimas here, Portfolio Analyst at the bank.', t: clock() }, { k: 'text', who: 'dimas', html: 'In Chapter 2 we join Rasa Kenari\'s sales with our loan book. That is the early-warning report everyone talks about.', t: clock() }];
   }
+  if (promotedNow) ST.promoDue = true;
+  ST.hold = m.id;
   logOf(m.from).push({ k: 'closed', mission: m.id, n: ST.closed.length, coffees: st.coffees, attempts: st.attempts, at: Date.now(), t: clock() });
   save();
-  renderWall();
+  /* The finished sheet stays up with the formula. Nothing moves on until the learner presses Continue. */
+  if (UI.person === m.from) renderChat(m.from); else renderWall();
   if (m.after) { await wait(900); await play(m.from, [{ k: 'sari', who: 'sari', html: esc(m.after) }]); }
-  const next = current();
-  if (UI.person === m.from && !(next && next.from === m.from)) renderChat(m.from);
-  if (!next && LIST.every(isClosed)) { await wait(1600); showFinale(); return; }
-  if (promotedNow) { await wait(1400); showPromo(); return; }
-  if (next && next.from === m.from && UI.person === m.from) { await wait(1600); if (UI.person === m.from) renderChat(m.from); return; }
-  if (next) { await wait(1200); toast(next); }
 }
 async function coffee() {
   const m = current();
@@ -694,7 +902,7 @@ function macroDockHTML(m) {
   if (!LAP.matches && UI.dock !== 'min') UI.dock = 'full';
   return `<section class="dock ${LAP.matches ? 'open' : UI.dock}" id="dock" aria-label="Macro workbook">
     <button class="grab" id="grab" aria-label="Make the workbook bigger or smaller"></button>
-    <div class="shd"><span class="xl m">X</span><span class="nm">${esc(m.file)}</span><small>· MarkOverdue</small>${LAP.matches ? '' : `<button class="icb" id="dockbig" aria-label="Full screen">${I(UI.dock === 'full' ? 'collapse' : 'expand')}</button>`}</div>
+    <div class="shd"><span class="xl m">X</span><span class="nm">${esc(m.file)}</span><small>· MarkOverdue</small>${LAP.matches ? maxButton() : `<button class="icb" id="dockbig" aria-label="Full screen">${I(UI.dock === 'full' ? 'collapse' : 'expand')}</button>`}</div>
     <div class="mac"><p class="say" id="say" role="status"></p><div class="split"><div class="code-v" id="codev" aria-label="The macro"></div><div class="gw" id="mgw"></div></div><div class="vars" id="vars" aria-label="Variables"></div></div>
     <div class="mac-acts"><button class="btn ghost" id="mback" aria-label="Back one line">${I('undo')}</button><button class="btn ghost" id="mend" aria-label="Run to the end">${I('ff')}End</button><button class="btn" id="mstep">${I('play')}Run the first line</button></div>
     <div class="msgbox" id="mmsg" hidden role="alertdialog" aria-label="Message box"><small>Microsoft Excel</small><span id="mmsgt"></span><button class="btn wide sm" id="mok" style="margin-top:10px">OK</button></div></section>`;
@@ -777,50 +985,73 @@ function loadExcel() {
 }
 const dlButton = () => `<button class="icb dl" id="dlx" aria-label="Download for Excel" title="Download for Excel">${I('download')}</button>`;
 /** The request's sheet as a real .xlsx: the same cells, headers in bold, the answer cells marked. */
-async function buildXlsx(m) {
-  const X = await loadExcel();
-  const wb = new X.Workbook();
-  wb.creator = 'Kicau, Kenari Excel Lab';
-  const ws = wb.addWorksheet('Sheet1');
-  const cols = m.cols || COLS, dates = m.dateCols || ['A'];
-  for (const [ref, v] of Object.entries(m.cells)) {
+/** Write a sheet's cells into an ExcelJS worksheet: bold headers, dates as dates, thousands separators. */
+function fillWorksheet(ws, cells, o) {
+  for (const [ref, v] of Object.entries(cells)) {
     const cell = ws.getCell(ref);
     const row = +ref.replace(/\D/g, ''), col = ref.replace(/\d/g, '');
-    if (((row >= m.first && dates.includes(col)) || (m.dateCells || []).includes(ref)) && typeof v === 'number') { cell.value = new Date(Date.UTC(1899, 11, 30) + v * 864e5); cell.numFmt = 'dd mmm'; }
+    if (((row >= o.first && o.dates.includes(col)) || (o.dateCells || []).includes(ref)) && typeof v === 'number') { cell.value = new Date(Date.UTC(1899, 11, 30) + v * 864e5); cell.numFmt = 'dd mmm'; }
     else cell.value = v;
     if (row === 4) cell.font = { bold: true };
     if (row < 4 && col === 'A') cell.font = { bold: true };
     if (typeof v === 'number' && v >= 1000) cell.numFmt = '#,##0';
   }
+  o.cols.forEach((c, i) => { ws.getColumn(i + 1).width = c === 'A' ? 16 : c === 'B' ? 22 : 14; });
+}
+const xlsxBlob = async (wb) => new Blob([await wb.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+/** The request's sheet as a real .xlsx: the same cells, headers in bold, the answer cells marked. */
+async function buildXlsx(m) {
+  const X = await loadExcel();
+  const wb = new X.Workbook();
+  wb.creator = 'Kicau, Kenari Excel Lab';
+  const ws = wb.addWorksheet(m.sheetName || 'Sheet1');
+  fillWorksheet(ws, m.cells, { first: m.first, dates: m.dateCols || ['A'], dateCells: m.dateCells, cols: m.cols || COLS });
   const isReport = BUILDERS.includes(m.kind) || m.pivotCheck;
   if (!isReport) for (const ref of fillRefs(m)) ws.getCell(ref).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3B0' } };
-  cols.forEach((c, i) => { ws.getColumn(i + 1).width = c === 'A' ? 16 : c === 'B' ? 22 : 14; });
+  /* The other sheets of the same workbook come along. */
+  for (const b of booksOf(m)) if (b.file === m.file) for (const sh of b.sheets) if (!sh.main) fillWorksheet(wb.addWorksheet(sh.name), sheetCells(m, b.file, sh.name), { first: sh.first, dates: sh.dateCols || [], cols: sh.cols });
   const req = wb.addWorksheet('Request');
   req.getCell('A1').value = PEOPLE[m.from].name + ', ' + PEOPLE[m.from].role;
   req.getCell('A2').value = strip(m.ask);
-  req.getCell('A3').value = isReport ? 'Build it in Excel from the data on Sheet1.' : m.spill ? 'Type one formula in ' + m.answerCell + ' and let it spill.' : m.fill ? 'Type the formula in ' + m.answerCell + ', then copy it down to ' + m.fill.col + m.fill.last + '.' : 'Type the formula in ' + m.answerCell + '.';
+  req.getCell('A3').value = isReport ? 'Build it in Excel from the data on ' + (m.sheetName || 'Sheet1') + '.' : m.spill ? 'Type one formula in ' + m.answerCell + ' and let it spill.' : m.fill ? 'Type the formula in ' + m.answerCell + ', then copy it down to ' + m.fill.col + m.fill.last + '.' : 'Type the formula in ' + m.answerCell + '.';
+  if (m.books && m.books.length > 1) req.getCell('A4').value = 'Open these workbooks too, with their names unchanged: ' + m.books.slice(1).map((b) => b.file).join(', ') + '. Then click into them while you type, and Excel writes the links.';
   req.getColumn(1).width = 90;
-  return new Blob([await wb.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  return xlsxBlob(wb);
+}
+/** Every workbook the request has open, each as its own file, named as in the request so Excel links match. */
+async function buildBooks(m) {
+  const out = [{ filename: m.file, blob: await buildXlsx(m) }];
+  const X = await loadExcel();
+  for (const b of booksOf(m).slice(1)) {
+    const wb = new X.Workbook();
+    wb.creator = 'Kicau, Kenari Excel Lab';
+    for (const sh of b.sheets) fillWorksheet(wb.addWorksheet(sh.name), sheetCells(m, b.file, sh.name), { first: sh.first, dates: sh.dateCols || [], cols: sh.cols });
+    out.push({ filename: b.file, blob: await xlsxBlob(wb) });
+  }
+  return out;
 }
 /** Hand the file over: through the viewer's save prompt inside claude.ai, or a normal download elsewhere. */
 async function downloadXlsx(m) {
   const btn = $('#dlx');
-  const filename = 'kicau-' + m.id + '-' + m.file.replace(/\.xls[xm]$/, '') + '.xlsx';
   try {
     if (btn) btn.disabled = true;
-    const blob = await buildXlsx(m);
+    /* One request, one file; a request with several workbooks gives each its real name, so Excel's links match. */
+    const files = m.books && m.books.length > 1 ? await buildBooks(m) : [{ filename: 'kicau-' + m.id + '-' + m.file.replace(/\.xls[xm]$/, '') + '.xlsx', blob: await buildXlsx(m) }];
     const host = window.claude && window.claude.use ? await window.claude.use('downloads') : null;
-    if (host) {
-      try { await host.save({ filename, data: blob }); flash('Saved ' + filename); }
-      catch (err) { if (err && err.code !== 'declined') flash(err.code === 'unavailable' || err.code === 'not_granted' ? 'Downloads are off in this view.' : 'The download did not go through.'); }
-    } else if (window.KENARI_ARTIFACT) {
-      flash('Downloads are off in this view.');
-    } else {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = filename; document.body.append(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 4000);
-      flash('Downloaded ' + filename);
+    for (const f of files) {
+      if (host) {
+        try { await host.save({ filename: f.filename, data: f.blob }); flash('Saved ' + f.filename); }
+        catch (err) { if (err && err.code !== 'declined') flash(err.code === 'unavailable' || err.code === 'not_granted' ? 'Downloads are off in this view.' : 'The download did not go through.'); if (err && (err.code === 'declined' || err.code === 'unavailable' || err.code === 'not_granted')) break; }
+      } else if (window.KENARI_ARTIFACT) {
+        flash('Downloads are off in this view.'); break;
+      } else {
+        const url = URL.createObjectURL(f.blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = f.filename; document.body.append(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+        flash(files.length > 1 ? 'Downloaded ' + files.map((x) => x.filename).join(' and ') : 'Downloaded ' + f.filename);
+        if (files.length > 1) await wait(400);
+      }
     }
   } catch (err) {
     flash('Excel export needs the internet the first time.');
@@ -838,8 +1069,8 @@ function flash(text) {
 function excelDockHTML(m) {
   return `<section class="dock ${LAP.matches ? 'open' : UI.dock === 'min' ? 'open' : UI.dock}" id="dock" aria-label="Real Excel request">
     <button class="grab" id="grab" aria-label="Make the workbook bigger or smaller"></button>
-    <div class="shd"><span class="xl">X</span><span class="nm">${esc(m.file)}</span><small>· real Excel</small></div>
-    <div class="xsteps"><div class="xstep"><b>1</b><span>Download the file</span><button class="btn sm" id="xdl">${I('download')}Download for Excel</button></div>
+    <div class="shd"><span class="xl">X</span><span class="nm">${esc(m.file)}</span><small>· real Excel</small>${maxButton()}</div>
+    <div class="xsteps"><div class="xstep"><b>1</b><span>${m.books && m.books.length > 1 ? `Download the ${m.books.length} files and open them all in Excel` : 'Download the file'}</span><button class="btn sm" id="xdl">${I('download')}Download for Excel</button></div>
     <div class="xstep"><b>2</b><span>${m.pivotCheck ? 'Insert a PivotTable: Distributor in Rows, Sum of Net in Values, then save' : m.spill ? `Type one formula in <code>${esc(m.answerCell)}</code> in Excel and let it spill, then save` : m.fill ? `Type the formula in <code>${esc(m.answerCell)}</code> and copy it down to <code>${esc(m.fill.col + m.fill.last)}</code> in Excel, then save` : `Type the formula in <code>${esc(m.answerCell)}</code> in Excel, then save`}</span></div>
     <div class="xstep"><b>3</b><span>Send the file back</span><label class="btn sm" for="xup">${I('upload')}Upload .xlsx</label><input type="file" id="xup" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12" class="sr"></div></div>
     <div class="gw" id="gw">${gridHTML(m)}</div></section>`;
@@ -854,7 +1085,7 @@ async function checkUpload(m, buf, name) {
     const X = await loadExcel();
     const wb = new X.Workbook();
     await wb.xlsx.load(buf);
-    const ws = wb.getWorksheet('Sheet1') || wb.worksheets[0];
+    const ws = wb.getWorksheet(m.sheetName || 'Sheet1') || wb.worksheets[0];
     for (const ref of fillRefs(m)) {
       const v = ws.getCell(ref).value;
       if (v && typeof v === 'object' && ('formula' in v || 'sharedFormula' in v)) { formulas++; got.push(v.result === undefined ? 0 : v.result && typeof v.result === 'object' && v.result.error ? v.result.error : v.result); /* Some tools skip storing a result of 0. */ }
@@ -863,7 +1094,7 @@ async function checkUpload(m, buf, name) {
   } catch (err) { readErr = err; }
   st.attempts++;
   const want = m.wantValues ? m.wantValues : !ENG.api ? [] : m.fill || m.spill ? fillValues(m, m.solution, 'base') : [evalOn(ENG.api, m.variantCells.base, m.answerCell, m.solution)];
-  const wrongRow = got.findIndex((v, i) => !Check.same(typeof v === 'string' && /^\d+$/.test(v) ? +v : v, want[i]));
+  const wrongRow = got.findIndex((v, i) => !Check.same(typeof v === 'string' && /^\d+$/.test(v) ? +v : v, want[i], m.precision, m.exactCase));
   const needF = m.valuesOnly ? 0 : m.spill ? 1 : got.length;
   const ok = !readErr && formulas >= needF && wrongRow < 0;
   logOf(m.from).push({ k: 'upload', who: 'me', mission: m.id, name: name || 'workbook.xlsx', summary: readErr ? 'could not be read' : `${formulas} of ${got.length} cells are formulas`, t: clock() });
@@ -986,7 +1217,7 @@ function vbaFixHTML(m) {
   }).join('');
   return `<section class="dock ${LAP.matches ? 'open' : UI.dock === 'min' ? 'full' : UI.dock}" id="dock" aria-label="Macro">
     <button class="grab" id="grab" aria-label="Make the workbook bigger or smaller"></button>
-    <div class="shd"><span class="xl m">X</span><span class="nm">${esc(m.file)}</span><small>· ${esc(m.macroName)}</small></div>
+    <div class="shd"><span class="xl m">X</span><span class="nm">${esc(m.file)}</span><small>· ${esc(m.macroName)}</small>${maxButton()}</div>
     <div class="mac"><div class="split"><div class="code-v" id="codev">${code}</div><div class="gw" id="mgw">${macroSheetHTML(m, st.res)}</div></div>
     <div class="brow">${m.choices.map((c) => `<button class="chip" data-line="${esc(c)}">${esc(c.trim())}</button>`).join('')}</div>
     ${st.res && st.res.msgs && st.res.msgs.length ? `<p class="bsum">MsgBox: ${esc(st.res.msgs[st.res.msgs.length - 1])}</p>` : ''}</div>
@@ -1127,7 +1358,7 @@ function buildDockHTML(m) {
   const label = { goal: 'Goal Seek', query: 'Power Query', pivot: 'PivotTable', chart: 'Chart', rule: m.rule === 'dv' ? 'Data validation' : 'Conditional formatting' }[m.kind];
   return `<section class="dock ${LAP.matches ? 'open' : UI.dock === 'min' ? 'open' : UI.dock}" id="dock" aria-label="${label} builder">
     <button class="grab" id="grab" aria-label="Make the workbook bigger or smaller"></button>
-    <div class="shd"><span class="xl">X</span><span class="nm">${esc(m.file)}</span><small>· ${label}</small>${dlButton()}</div>
+    <div class="shd"><span class="xl">X</span><span class="nm">${esc(m.file)}</span><small>· ${label}</small>${dlButton()}${maxButton()}</div>
     <div class="bwrap" id="bwrap"><div id="bctl">${m.kind === 'query' ? queryControls(m, c) : buildControls(m, c)}</div><div class="bprev" id="bprev">${preview}</div></div>
     <div class="comp"><button class="coffee${coffeesLeft() ? '' : ' out'}" id="coffee" aria-label="Coffee with Mbak Sari">${I('coffee')}<i>${coffeesLeft()}</i></button><span class="sp"></span><button class="btn" id="bsend">${I('send')}Send to ${esc(PEOPLE[m.from].short)}</button></div></section>`;
 }
@@ -1235,7 +1466,7 @@ function showFinale() {
   el.className = 'promo';
   el.setAttribute('role', 'dialog');
   el.setAttribute('aria-label', 'Course complete');
-  el.innerHTML = `${confetti(90)}<div class="in"><div class="ring-av">${avatar('me', 108)}</div><small>Kenari Excel Lab · complete</small><h1>${esc(rankOf(ST.closed.length).title)}</h1><p>${LIST.length} requests, ten chapters, two companies. From SUM to a report that warned a bank in time.</p>
+  el.innerHTML = `${confetti(90)}<div class="in"><div class="ring-av">${avatar('me', 108)}</div><small>Kenari Excel Lab · complete</small><h1>${esc(rankOf(ST.closed.length).title)}</h1><p>${LIST.length} requests, ${MS.CHAPTERS.length} chapters, two companies, and files that talk to each other. From SUM to a report that warned a bank in time.</p>
     <div class="kp"><span><b>${LIST.length}</b>requests</span><span><b>${firstTry}</b>first try</span><span><b>${cups}</b>${cups === 1 ? 'coffee' : 'coffees'}</span></div>
     <div class="unlock">${avatar('sari', 44, { on: true })}<div><b>Mbak Sari:</b> I had nothing left to teach you by Chapter 8 😄 Selamat, ${esc(ST.name)}.</div></div>
     <button class="btn" id="promook">Back to Kicau</button></div>`;
@@ -1395,7 +1626,17 @@ if (window.visualViewport) {
   const fit = () => { app.style.height = visualViewport.height + 'px'; };
   visualViewport.addEventListener('resize', fit);
 }
+/* The opening (Mix 1, "The whole day") plays once per visit, over the app as it loads. ?fast and ?nointro skip it,
+   ?intro plays it again. A tap, any key or the Skip button ends it; reduced motion gets a calm fade. */
+(function opening() {
+  if (typeof window.kcIntro !== 'function' || FAST || Q.has('nointro')) return;
+  let seen = false;
+  try { seen = sessionStorage.getItem('kicau.intro') === '1'; } catch (e) { /* storage blocked: play it */ }
+  if (seen && !Q.has('intro')) return;
+  try { sessionStorage.setItem('kicau.intro', '1'); } catch (e) { /* storage blocked */ }
+  try { window.kcIntro(() => { const n = $('#wname'); if (n && !coarse) n.focus({ preventScroll: true }); }); } catch (e) { /* the app works without it */ }
+})();
 render();
 
 /* For the browser tests. */
-window.__kicau = { setLine: (l) => { MST(current().id).line = l; }, sendVba: () => sendVba(current()), runQuery, setSteps: (steps) => { cfgOf(current()).steps = JSON.parse(JSON.stringify(steps)); }, setCfg: (cfg) => { const m = current(); Object.assign(cfgOf(m), cfg); }, sendBuild: () => sendBuild(current()), pivot, get ST() { return ST; }, LIST, MS, send, setFormula, coffee, pick, current, engine: enginePromise, run: (m) => run(m), Check, fillValues, uploadBuffer: (buf, name) => checkUpload(current(), buf, name || 'koleksi_oktober.xlsx'), buildXlsx: (m) => buildXlsx(m || current()) };
+window.__kicau = { setLine: (l) => { MST(current().id).line = l; }, sendVba: () => sendVba(current()), runQuery, setSteps: (steps) => { cfgOf(current()).steps = JSON.parse(JSON.stringify(steps)); }, setCfg: (cfg) => { const m = current(); Object.assign(cfgOf(m), cfg); }, sendBuild: () => sendBuild(current()), pivot, get ST() { return ST; }, LIST, MS, send, setFormula, coffee, pick, current, engine: enginePromise, run: (m) => run(m), Check, fillValues, uploadBuffer: (buf, name) => checkUpload(current(), buf, name || 'koleksi_oktober.xlsx'), buildXlsx: (m) => buildXlsx(m || current()), buildBooks: (m) => buildBooks(m || current()), cont, refsIn, get UI() { return UI; } };

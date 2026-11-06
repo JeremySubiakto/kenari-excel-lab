@@ -17,7 +17,7 @@ const OUT = path.join(ROOT, 'dist/kicau');
 const CACHE = path.join(ROOT, 'assets/engine');
 const CDN = 'https://cdn.jsdelivr.net/npm/formualizer@0.13.0/pkg/';
 const ENGINE = ['formualizer_wasm_bg.js', 'formualizer_wasm_bg.wasm'];
-const FILES = ['assets/css/kicau.css', 'assets/js/core/data.js', 'assets/js/core/check.js', 'assets/js/core/vba.js', 'assets/js/core/engine.js', 'assets/js/kicau/people.js', 'assets/js/kicau/missions.js', 'assets/js/kicau/app.js'];
+const FILES = ['assets/css/kicau.css', 'assets/css/intro.css', 'assets/js/kicau/intro.js', 'assets/js/core/data.js', 'assets/js/core/check.js', 'assets/js/core/vba.js', 'assets/js/core/engine.js', 'assets/js/kicau/people.js', 'assets/js/kicau/missions.js', 'assets/js/kicau/app.js'];
 
 fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(path.join(OUT, 'vendor'), { recursive: true });

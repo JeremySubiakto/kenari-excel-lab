@@ -1,0 +1,193 @@
+/* Kicau's opening, Mix 1 "The whole day": messages arrive, the formula solves itself, the canary takes off.
+   Plays once per visit before the app (see intro.js). Everything is scoped under #kc-intro. */
+#kc-intro{position:fixed;inset:0;z-index:2147483000;overflow:hidden;contain:strict;font-family:"Plus Jakarta Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#1C1A14;line-height:1.2;text-align:left;-webkit-font-smoothing:antialiased;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;cursor:default;touch-action:manipulation;--ct:58%;--cb:42%}
+#kc-intro *,#kc-intro *::before,#kc-intro *::after{box-sizing:border-box;margin:0;padding:0}
+#kc-intro i{font-style:normal}
+#kc-intro .kci-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+#kc-intro .kci-lay{position:absolute;inset:0}
+#kc-intro .kci-probe{position:absolute;left:0;top:0;width:0;height:0;overflow:hidden}
+
+/* ---------- Act 1: the requests arrive on a dark stage (from Option B) ---------- */
+#kc-intro .k1-dark{overflow:hidden;background:radial-gradient(55% 45% at 88% 6%,rgba(46,107,214,.13),rgba(46,107,214,0) 70%),radial-gradient(50% 45% at 6% 96%,rgba(194,69,58,.11),rgba(194,69,58,0) 70%),#1C1A14}
+#kc-intro .k1-dark::after{content:"";position:absolute;inset:0;background:radial-gradient(120% 95% at 50% 50%,rgba(0,0,0,0) 52%,rgba(0,0,0,.42) 100%)}
+#kc-intro .k1-glow{position:absolute;left:50%;top:50%;width:130vmax;height:130vmax;margin:-65vmax 0 0 -65vmax;border-radius:50%;background:radial-gradient(closest-side,rgba(242,183,5,.17),rgba(242,183,5,.06) 42%,rgba(242,183,5,0) 72%)}
+#kc-intro .k1-grid{position:absolute;left:0;right:0;top:-60px;bottom:-60px;background-image:linear-gradient(rgba(255,248,225,.055) 1px,transparent 1px),linear-gradient(90deg,rgba(255,248,225,.055) 1px,transparent 1px);background-size:88px 30px;background-position:50% 0;-webkit-mask-image:radial-gradient(ellipse 62% 52% at 50% 50%,#000 15%,transparent 100%);mask-image:radial-gradient(ellipse 62% 52% at 50% 50%,#000 15%,transparent 100%)}
+#kc-intro .k1-tokens{position:absolute;inset:0;font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:500}
+#kc-intro .k1-tokens span{position:absolute;white-space:nowrap;color:#FFF8E1;opacity:0}
+#kc-intro .k1-tokens b{font-weight:600}
+
+#kc-intro .k1-chat{display:grid;place-items:center}
+#kc-intro .k1-feed{width:max-content;max-width:calc(100% - 32px);display:flex;flex-direction:column;align-items:flex-start;gap:17px}
+#kc-intro .k1-head{display:flex;align-items:center;gap:8px;padding-left:48px;margin-bottom:-3px}
+#kc-intro .k1-hl{font-size:11.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#A39C8C}
+#kc-intro .k1-badge{display:inline-block;height:20px;min-width:20px;padding:0 6px;border-radius:10px;overflow:hidden;background:#EF4444;color:#FFFFFF;font-size:11.5px;font-weight:800;line-height:20px;text-align:center;box-shadow:0 0 0 2px #1C1A14,0 6px 14px -6px rgba(239,68,68,.8)}
+#kc-intro .k1-strip{display:block}
+#kc-intro .k1-strip i{display:block;height:20px}
+#kc-intro .k1-row{display:flex;align-items:flex-end;gap:10px;max-width:100%}
+#kc-intro .k1-row:nth-of-type(3){margin-left:clamp(10px,4vw,28px)}
+#kc-intro .k1-row:nth-of-type(4){margin-left:clamp(4px,1.6vw,10px)}
+#kc-intro .k1-av{position:relative;flex:none;width:38px;height:38px;transform-origin:50% 100%}
+#kc-intro .k1-face{width:100%;height:100%;border-radius:50%;overflow:hidden;box-shadow:0 0 0 2px rgba(255,248,225,.1)}
+#kc-intro .k1-face svg{display:block;width:100%;height:100%}
+#kc-intro .k1-on{position:absolute;right:-1px;bottom:-1px;width:11px;height:11px;border-radius:50%;background:#22C55E;box-shadow:0 0 0 2.5px #1C1A14}
+#kc-intro .k1-bw{position:relative;min-width:0;transform-origin:0 100%}
+#kc-intro .k1-bub{position:relative;min-width:120px;padding:8px 13px 10px;border-radius:18px 18px 18px 6px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(28,26,20,.13)}
+#kc-intro .k1-bub,#kc-intro .k1-cl{color:#1C1A14;font-size:clamp(15px,.45vw + 9.5px,16.5px);line-height:1.38}
+#kc-intro .k1-who{display:flex;align-items:baseline;gap:6px;font-size:12.5px;font-weight:700;line-height:1.3;white-space:nowrap;margin-bottom:1px}
+#kc-intro .k1-who span{font-weight:500;color:#7A7468}
+#kc-intro .k1-who time{margin-left:auto;padding-left:14px;font-size:11px;font-weight:500;color:#A39C8C}
+#kc-intro .k1-msg{font-weight:500;white-space:nowrap}
+#kc-intro .k1-dots{position:absolute;left:17px;bottom:14.5px;display:flex;gap:4px}
+#kc-intro .k1-dots i{display:block;width:7px;height:7px;border-radius:50%;background:#A39C8C}
+
+/* Seam 1: each bubble's flight copy. The white shape reshapes into the formula bar or a sheet tab with clip-path. */
+#kc-intro .k1-fly{pointer-events:none}
+#kc-intro .k1-sh{position:absolute;inset:0;opacity:0}
+#kc-intro .k1-sh.o{background:rgba(28,26,20,.13)}
+#kc-intro .k1-sh.w{background:#FFFFFF}
+#kc-intro .k1-cl{position:absolute;left:0;top:0;opacity:0;transform-origin:0 0}
+
+/* ---------- Act 2: the workbook (from Option A) ---------- */
+/* the light opens from the middle as a disc with a short soft rim (a wide rim left a dark vignette in the corners), then the workbook's backdrop settles in over it */
+#kc-intro .k2-iris{position:absolute;left:50%;top:50%;border-radius:50%;background:radial-gradient(closest-side,#F6F4EF 95%,rgba(246,244,239,0) 100%);transform:scale(0)}
+#kc-intro .k2-bg{overflow:hidden;background:#F6F4EF;opacity:0}
+#kc-intro .k2-glow{position:absolute;left:50%;top:50%;width:80vmax;height:80vmax;margin:-40vmax 0 0 -40vmax;border-radius:50%;background:radial-gradient(closest-side,rgba(242,183,5,.30),rgba(242,183,5,0));transform:translate(20vw,-18vh) scale(.92)}
+#kc-intro .k2-glow.g2{width:60vmax;height:60vmax;margin:-30vmax 0 0 -30vmax;background:radial-gradient(closest-side,rgba(16,124,65,.11),rgba(16,124,65,0));transform:translate(-24vw,22vh) scale(1)}
+#kc-intro .k2-dots{position:absolute;inset:0;background-image:radial-gradient(rgba(28,26,20,.11) 1px,transparent 1.4px);background-size:22px 22px;-webkit-mask-image:radial-gradient(ellipse 72% 62% at 50% 50%,#000 15%,transparent 78%);mask-image:radial-gradient(ellipse 72% 62% at 50% 50%,#000 15%,transparent 78%);opacity:0}
+
+#kc-intro .k2-stage{display:flex;align-items:center;justify-content:center;visibility:hidden}
+#kc-intro .k2-cam{position:relative}
+#kc-intro .k2-floor{position:absolute;left:6%;right:6%;bottom:-1.5em;height:2.4em;border-radius:50%;background:radial-gradient(closest-side,rgba(28,26,20,.24),rgba(28,26,20,0))}
+#kc-intro .k2-wb{position:relative;background:#fff;border-radius:.5em;overflow:hidden;box-shadow:0 0 0 1px rgba(28,26,20,.08),0 1px 2px rgba(28,26,20,.06),0 .7em 1.4em -.7em rgba(28,26,20,.22),0 2.2em 3.6em -1.6em rgba(28,26,20,.36);transform-origin:50% 100%}
+#kc-intro .k2-tb{display:flex;align-items:center;gap:.55em;height:2.1em;padding:0 .8em;background:#107C41;color:#fff}
+#kc-intro .k2-tb > *{opacity:0}
+#kc-intro .k2-xl{flex:none;width:1.15em;height:1.15em;display:block}
+#kc-intro .k2-fn{font-size:.74em;font-weight:600;letter-spacing:.005em;white-space:nowrap}
+#kc-intro .k2-fn small{font-weight:500;opacity:.72;font-size:1em}
+#kc-intro .k2-wc{margin-left:auto;display:flex;gap:1em;align-items:center}
+#kc-intro .k2-wc svg{width:.62em;height:.62em;display:block;opacity:.9}
+#kc-intro .k2-fbar{display:flex;align-items:stretch;height:2.05em;border-bottom:1px solid #D4D4D4;background:#fff;font-family:Carlito,Calibri,"Segoe UI",Arial,sans-serif;color:#212121}
+#kc-intro .k2-nbox{position:relative;flex:none;width:3.7em;border-right:1px solid #D4D4D4;overflow:hidden}
+#kc-intro .k2-nb{position:absolute;left:.6em;top:0;bottom:0;display:flex;align-items:center;font-size:.9em}
+#kc-intro .k2-nb.e{opacity:0}
+#kc-intro .k2-dd{position:absolute;right:.5em;top:50%;margin-top:-.08em;border:.24em solid transparent;border-top-color:#666;border-bottom:0}
+#kc-intro .k2-fxi{flex:none;display:flex;align-items:center;gap:.6em;padding:0 .65em;border-right:1px solid #D4D4D4;color:#8A8A8A}
+#kc-intro .k2-fxi svg{width:.62em;height:.62em;display:block}
+#kc-intro .k2-ic{position:relative;display:block}
+#kc-intro .k2-ic .on{position:absolute;inset:0;opacity:0}
+#kc-intro .k2-ic.x .on{color:#C2453A}
+#kc-intro .k2-ic.v .on{color:#107C41}
+#kc-intro .k2-fxi em{font:italic .9em "Times New Roman",Georgia,serif;color:#666}
+#kc-intro .k2-fx{position:relative;flex:1;min-width:0;display:flex;align-items:center;padding-left:.6em;overflow:hidden}
+/* the caret rides a layer as wide as the formula, so its steps are a share of the text width and stay right if the font swaps in late */
+#kc-intro .k2-fw{position:relative;flex:none;display:flex;align-items:center}
+#kc-intro .k2-cw{position:absolute;left:0;top:0;bottom:0;width:100%}
+#kc-intro .k2-ftw{position:relative;display:inline-block;font:500 .84em/1.25 "JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;white-space:pre;color:#212121;clip-path:inset(-3px 100% -3px 0)}
+#kc-intro .k2-ftw .plain{position:absolute;left:0;top:0;opacity:0;color:#212121}
+#kc-intro .k2-caret{position:absolute;left:0;top:50%;width:1.5px;height:1.15em;margin-top:-.6em;background:#212121;opacity:0}
+
+/* the sheet: everything inside is placed in px by kcIntro so the gridlines land on whole pixels */
+#kc-intro .k2-sheet{position:relative;overflow:hidden;background:#fff;font-family:Carlito,Calibri,"Segoe UI",Arial,sans-serif;color:#212121}
+#kc-intro .k2-sheet > *{position:absolute}
+#kc-intro .k2-hrow{left:0;top:0;width:100%;background:#F3F3F3;border-bottom:1px solid #D4D4D4;transform-origin:0 0}
+#kc-intro .k2-hcol{left:0;top:0;height:100%;background:#F3F3F3;border-right:1px solid #D4D4D4;transform-origin:0 0}
+#kc-intro .k2-hon{background:#D3EBDD;opacity:0}
+#kc-intro .k2-hon.c{box-shadow:inset 0 -2px 0 #107C41}
+#kc-intro .k2-hon.r{box-shadow:inset -2px 0 0 #107C41}
+#kc-intro .k2-fill.in{background:#FFF4CC}
+#kc-intro .k2-fill.th{background:#EAF4EE;transform-origin:0 0}
+#kc-intro .k2-hit{opacity:0}
+#kc-intro .k2-hit.b{background:rgba(194,69,58,.17)}
+#kc-intro .k2-hit.e{background:rgba(46,107,214,.17)}
+#kc-intro .k2-hl{left:0;width:100%;height:1px;transform-origin:0 0}
+#kc-intro .k2-vl{top:0;width:1px;height:100%;transform-origin:0 0}
+#kc-intro .k2-ch,#kc-intro .k2-rh{display:flex;align-items:center;justify-content:center;font-size:.8em;color:#444}
+#kc-intro .k2-rngs{left:0;top:0;width:100%;height:100%}
+#kc-intro .k2-rg{position:absolute;border:2px solid var(--c);background:var(--t);opacity:0}
+#kc-intro .k2-rg i{position:absolute;width:5px;height:5px;background:var(--c);box-shadow:0 0 0 1px #fff}
+#kc-intro .k2-rg i:nth-child(1){left:-4px;top:-4px}
+#kc-intro .k2-rg i:nth-child(2){right:-4px;top:-4px}
+#kc-intro .k2-rg i:nth-child(3){left:-4px;bottom:-4px}
+#kc-intro .k2-rg i:nth-child(4){right:-4px;bottom:-4px}
+#kc-intro .k2-rg.full{opacity:1;clip-path:inset(-6px -6px 100% -6px)}
+#kc-intro .k2-c,#kc-intro .k2-val,#kc-intro .k2-chip{display:flex;align-items:center;white-space:nowrap}
+#kc-intro .k2-c span,#kc-intro .k2-val span{font-size:.92em}
+#kc-intro .k2-c.n,#kc-intro .k2-val,#kc-intro .k2-chip{justify-content:flex-end}
+#kc-intro .k2-c.b span{font-weight:700}
+#kc-intro .k2-val span{display:inline-block;color:#5C5C5C;transform-origin:60% 55%}
+#kc-intro .k2-val.fin span{font-weight:700;color:#1F1F1F}
+#kc-intro .k2-val{opacity:0}
+#kc-intro .k2-chip b{display:inline-block;font-size:.84em;font-weight:700;color:#fff;background:#2E6BD6;border-radius:.32em;padding:.1em .4em;box-shadow:0 .35em .8em -.3em rgba(46,107,214,.75);opacity:0}
+#kc-intro .k2-selw{transform-origin:0 0}
+#kc-intro .k2-sel{position:absolute;inset:0;border:2px solid #107C41;opacity:0}
+#kc-intro .k2-sel::after{content:"";position:absolute;right:-4px;bottom:-4px;width:6px;height:6px;background:#107C41;box-shadow:0 0 0 1px #fff}
+#kc-intro .k2-ring{border:2px solid #107C41;border-radius:2px;opacity:0}
+#kc-intro .k2-tabs{position:relative;display:flex;align-items:stretch;height:1.7em;background:#F3F3F3;border-top:1px solid #D4D4D4;font-family:Carlito,Calibri,"Segoe UI",Arial,sans-serif;color:#444;opacity:0}
+#kc-intro .k2-tabs > span,#kc-intro .k2-tabs > b{display:flex;align-items:center;padding:0 .9em;font-size:.8em}
+#kc-intro .k2-tabs .arr{letter-spacing:.3em;color:#8A8A8A;padding:0 .7em}
+#kc-intro .k2-tabs b{background:#fff;color:#107C41;font-weight:700;box-shadow:inset 0 -2px 0 #107C41}
+#kc-intro .k2-tabs .k2-tab i{display:block;opacity:0}
+#kc-intro .k2-tabs .st{position:absolute;right:0;top:0;bottom:0;width:4.4em;padding:0;justify-content:flex-end;padding-right:.9em;color:#666}
+#kc-intro .k2-tabs .st i{position:absolute;right:.9em}
+#kc-intro .k2-tabs .st .ent{opacity:0}
+
+/* Seam 2: the answer cell fills with gold, then reshapes into the canary (a clip-path polygon morph) */
+#kc-intro .k3-morph{opacity:0}
+#kc-intro .k3-gold{position:absolute;inset:0;background:#F2B705}
+#kc-intro .k3-num{position:absolute;display:flex;align-items:center;justify-content:flex-end;font-family:Carlito,Calibri,"Segoe UI",Arial,sans-serif;font-weight:700;color:#1C1A14;white-space:nowrap}
+#kc-intro .k3-num span{display:inline-block;transform-origin:60% 55%}
+
+/* ---------- Act 3: the canary takes off (from Option C) ---------- */
+#kc-intro .k3-wipe{clip-path:polygon(-50% 0%,-1% 0%,-26% 100%,-50% 100%)}
+#kc-intro .k3-s1{background:#FFF0BF}
+#kc-intro .k3-s2{background:#E29C00}
+#kc-intro .k3-lin{background:#D99500}
+#kc-intro .k3-half{background:radial-gradient(130vmax 95vmax at 50% 44%,#FFC926 0%,#F2B705 52%,#E8AC00 100%);overflow:hidden}
+/* The diagonal cut runs from --ct (top edge) to --cb (bottom edge). kcIntro aims it through the gap between "i" and "c". */
+#kc-intro .k3-cl{clip-path:polygon(0% 0%,calc(var(--ct) + .3%) 0%,calc(var(--cb) + .3%) 100%,0% 100%)}
+#kc-intro .k3-cr{clip-path:polygon(calc(var(--ct) - .3%) 0%,100% 0%,100% 100%,calc(var(--cb) - .3%) 100%)}
+#kc-intro .k3-grid{position:absolute;inset:-64px;background-image:linear-gradient(rgba(28,26,20,.075) 1px,transparent 1px),linear-gradient(90deg,rgba(28,26,20,.075) 1px,transparent 1px);background-size:96px 28px;-webkit-mask-image:radial-gradient(ellipse 75% 70% at 50% 46%,transparent 22%,#000 78%);mask-image:radial-gradient(ellipse 75% 70% at 50% 46%,transparent 22%,#000 78%)}
+#kc-intro .k3-top{transform-origin:50% 46%}
+/* one whole lockup (.k3-solo) carries the build and the hold; each curtain half holds a copy (.k3-split) that takes over on the frame the curtain moves */
+#kc-intro .k3-split{opacity:0}
+#kc-intro .k3-half.k3-cl > .k3-top{clip-path:polygon(0% 0%,calc(var(--ct) - .3%) 0%,calc(var(--cb) - .3%) 100%,0% 100%)}
+#kc-intro .k3-stage{display:flex;align-items:center;justify-content:center;padding:0 16px 7vh}
+#kc-intro .k3-lockup{--F:clamp(54px,18vw,112px);display:flex;flex-direction:column;align-items:center;max-width:100%}
+#kc-intro .k3-row{display:flex;align-items:center;font-size:var(--F);line-height:1}
+#kc-intro .k3-slot{position:relative;flex:none;width:1.2em;height:1.2em;margin:0 .01em 0 -.1em;top:-.015em}
+#kc-intro .k3-word{display:flex;font-weight:800;letter-spacing:-.045em;padding:.08em .06em .06em 0;clip-path:inset(-.5em -.4em 0 -.4em)}
+#kc-intro .k3-ch{display:inline-block;transform-origin:0% 100%}
+#kc-intro .k3-sub{display:flex;align-items:center;gap:.9em;margin-top:calc(var(--F) * .16);font-size:clamp(11.5px,3.1vw,14.5px);font-weight:700;line-height:1;letter-spacing:.26em;text-transform:uppercase;white-space:nowrap}
+#kc-intro .k3-subtxt{display:flex;padding-left:.26em}
+#kc-intro .k3-sc{display:inline-block;white-space:pre}
+#kc-intro .k3-rule{display:block;width:clamp(22px,7vw,52px);height:2px;border-radius:2px;background:#1C1A14;opacity:.5}
+#kc-intro .k3-rl{transform-origin:100% 50%}
+#kc-intro .k3-rr{transform-origin:0% 50%}
+#kc-intro .k3-chirp{position:absolute;left:1.04em;top:-.02em;width:.4em;height:.4em;overflow:visible}
+#kc-intro .k3-dash{stroke-dasharray:1 2;stroke-dashoffset:1}
+
+/* The canary: four nested wrappers so x, y, turn and squash each get their own easing, which draws true arcs */
+#kc-intro .k3-bird{position:absolute;left:0;top:0;width:var(--D);height:var(--D);pointer-events:none}
+#kc-intro .k3-bird div{position:absolute;inset:0}
+#kc-intro .k3-fr{transform-origin:50% 50%}
+#kc-intro .k3-sq{transform-origin:50% 85%}
+#kc-intro .k3-svg{display:block;width:100%;height:100%;overflow:visible}
+#kc-intro .k3-wing{transform-origin:11.6px 10.2px;opacity:0}
+#kc-intro .k3-eye{transform-box:fill-box;transform-origin:50% 50%}
+#kc-intro .k3-bird-a{opacity:0}
+#kc-intro .k3-bird-a .k3-svg{filter:drop-shadow(0 .4px .5px rgba(28,26,20,.28))}
+
+/* Skip: dark glass, readable on the dark stage, the workbook and the yellow */
+#kc-intro .kci-skip{position:absolute;right:max(16px,env(safe-area-inset-right));bottom:max(16px,calc(env(safe-area-inset-bottom) + 10px));z-index:5;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:76px;min-height:44px;padding:0 16px 0 18px;-webkit-appearance:none;appearance:none;border-radius:999px;border:1px solid rgba(255,248,225,.24);background:rgba(28,26,20,.66);color:#FFF8E1;font:700 14px/1 "Plus Jakarta Sans",system-ui,sans-serif;letter-spacing:.01em;cursor:pointer;opacity:0}
+#kc-intro .kci-skip svg{width:14px;height:14px;display:block}
+#kc-intro .kci-skip:focus{outline:none}
+#kc-intro .kci-skip:focus-visible{outline:2px solid #F2B705;outline-offset:3px}
+
+/* Reduced motion: a calm fade of the logo and wordmark on the app's own background */
+#kc-intro .kci-rmbg{background:#F6F4EF}
+#kc-intro .kci-rmlock{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:16px;opacity:0}
+#kc-intro .kci-tile{flex:none;width:76px;height:76px;border-radius:24px;display:grid;place-items:center;background:#F2B705;color:#1C1A14;box-shadow:0 18px 40px -16px #F2B705}
+#kc-intro .kci-tile svg{width:46px;height:46px;display:block}
+#kc-intro .kci-rmw b{display:block;font-size:46px;font-weight:800;letter-spacing:-.045em;line-height:1}
+#kc-intro .kci-rmw small{display:block;margin-top:6px;font:500 13px "JetBrains Mono",ui-monospace,Menlo,monospace;letter-spacing:.06em;color:rgba(28,26,20,.75)}
+#kc-intro.kci-rm .kci-skip{color:#57524A;border-color:#D6CFBF;background:#FFFFFF}

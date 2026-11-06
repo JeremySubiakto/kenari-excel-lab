@@ -26,6 +26,20 @@ const tap = async (p, sel) => {
   return true;
 };
 const openK = async (p, path) => { await p.go(BASE + path, 300); await until(p, `!!document.querySelector('#app') && document.querySelector('#app').children.length > 0`, 15000); await sleep(150); };
+/* After a request closes, the finished sheet waits for Continue. checkStill also proves nothing moves on by itself. */
+const pressContinue = async (p, name, checkStill) => {
+  const held = await p.ev(`window.__kicau.ST.hold`);
+  if (!held) return;
+  const from = await p.ev(`window.__kicau.LIST.find((x) => x.id === window.__kicau.ST.hold).from`);
+  if ((await p.ev(`location.hash`)) !== '#chat-' + from) await p.ev(`location.hash = '#chat-${from}'`);
+  ok(await until(p, `!!document.querySelector('.dock.review [data-continue]')`), name + ': the finished sheet waits for Continue', held);
+  if (checkStill) {
+    await sleep(2500);
+    ok(await p.ev(`window.__kicau.ST.hold === ${JSON.stringify(held)} && !!document.querySelector('.dock.review')`), name + ': nothing moves on without Continue');
+  }
+  await tap(p, '.dock.review [data-continue]');
+  ok(await until(p, `!window.__kicau.ST.hold`), name + ': Continue moves on');
+};
 /* The Request closed card keeps its full height and its bottom can be scrolled into view. */
 const doneWhole = `(() => { const d = [...document.querySelectorAll('.done')].pop(); const w = document.getElementById('wall'); if (!d || !w) return false; w.scrollTop = w.scrollHeight; const a = d.getBoundingClientRect(), b = w.getBoundingClientRect(); return d.clientHeight >= d.scrollHeight - 1 && a.bottom <= b.bottom + 1; })()`;
 const locked = async (p, name) => { const s = await p.scrollInfo(); ok(s.doc <= s.vh + 1 && s.sw <= s.cw + 1, name + ': the page itself does not scroll', s); };
@@ -115,6 +129,17 @@ const inView = async (p, sel, name) => {
   ok(await p.ev(`document.querySelector('#gw td[data-ref="E10"]').className.includes('k0')`), 'the range lights up in the grid');
   ok(await p.ev(`!!document.querySelector('#paint .p0')`), 'the reference is colored in the formula bar');
   await p.shot('kicau-phone-task');
+  /* Full screen sheet: the small chat floats over it. */
+  await tap(p, '#dockbig');
+  ok(await until(p, `document.getElementById('dock').classList.contains('full') && getComputedStyle(document.getElementById('mini')).display !== 'none'`), 'phone: the full screen sheet has a small chat button');
+  await tap(p, '#minipill');
+  ok(await until(p, `/Request 1\.1/.test(document.getElementById('miniask').textContent) && document.querySelectorAll('#minilog .mm').length > 0`), 'phone: the small chat shows the request and Tika’s messages');
+  await inView(p, '#miniclose', 'phone small chat');
+  await sleep(400);
+  await p.shot('kicau-phone-mini');
+  await tap(p, '#miniclose');
+  await tap(p, '#dockbig');
+  ok(await until(p, `!document.getElementById('dock').classList.contains('full')`), 'phone: the sheet goes back to its usual size');
   await tap(p, '#send');
   ok(await until(p, `[...document.querySelectorAll('.b.them')].some((b) => /Net \\(Rp\\)/.test(b.textContent) && /cartons\\?/i.test(b.textContent))`), 'Tika replies in character to the rupiah mistake');
   ok(await until(p, `!!document.querySelector('.mentor.warn')`), 'Sari explains the mistake');
@@ -136,12 +161,17 @@ const inView = async (p, sel, name) => {
   await sleep(300);
   ok(await p.ev(doneWhole), 'phone: the Request closed card is shown whole');
   await p.shot('kicau-phone-pass');
+  ok(await until(p, `!!document.querySelector('.dock.review .fxro')`), 'phone: the finished sheet stays up after 1.1 closes');
+  ok(/SUM\(D5:D24\)/.test(await p.ev(`document.querySelector('.dock.review .fxro').textContent`)), 'phone: the review shows the formula that solved it');
+  await p.shot('kicau-phone-review');
+  await pressContinue(p, 'phone 1.1', true);
 
   /* The rest of the week. */
   for (let guard = 0; guard < 200; guard++) {
     const m = await p.ev(`(() => { const c = window.__kicau.current(); return c ? { id: c.id, from: c.from, kind: c.kind, solution: c.solution, want: c.want, steps: c.solutionSteps, line: c.solutionLine, choices: c.choices, valuesOnly: !!c.valuesOnly, pivotCheck: !!c.pivotCheck } : null; })()`);
     if (!m) break;
-    await p.ev(`location.hash = '#chat-${m.from}'`);
+    await pressContinue(p, 'phone ' + m.id, false);
+    if ((await p.ev(`location.hash`)) !== '#chat-' + m.from) await p.ev(`location.hash = '#chat-${m.from}'`);
     ok(await until(p, `!document.querySelector('.typingb') && [...document.querySelectorAll('.mentor.lesson')].length > 0 && !!document.querySelector('#dock')`), `${m.id}: the request plays in`);
     await sleep(120);
     if (m.kind === 'vbafix') {
@@ -197,14 +227,14 @@ const inView = async (p, sel, name) => {
       await p.shot('kicau-phone-pivot-excel');
     } else if (m.kind === 'excel') {
       await p.shot('kicau-phone-excel');
-      const blobOk = await p.ev(`(async () => { const b = await window.__kicau.buildXlsx(); const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await b.arrayBuffer()); const ws = wb.getWorksheet('Sheet1'); const m = window.__kicau.current(); const h = m.spill ? 'G4' : m.fill ? m.fill.col + (m.fill.first - 1) : 'A1'; return { size: b.size, head: ws.getCell(h).value, want: m.cells[h], req: !!wb.getWorksheet('Request') }; })()`);
+      const blobOk = await p.ev(`(async () => { const b = await window.__kicau.buildXlsx(); const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await b.arrayBuffer()); const m = window.__kicau.current(); const ws = wb.getWorksheet(m.sheetName || 'Sheet1'); const h = m.spill ? 'G4' : m.fill ? m.fill.col + (m.fill.first - 1) : 'A1'; return { size: b.size, head: ws.getCell(h).value, want: m.cells[h], req: !!wb.getWorksheet('Request') }; })()`);
       ok(blobOk.size > 4000 && blobOk.head === blobOk.want && blobOk.req, 'the request downloads as a real .xlsx', blobOk);
       /* A file with typed grades first, then one with formulas. */
       const upload = (withFormulas) => p.ev(`(async () => {
         const K = window.__kicau, m = K.current();
         const want = m.wantValues || (m.fill || m.spill ? K.fillValues(m, m.solution, 'base') : [K.run(m)(m.solution, 'base')]);
         const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await (await K.buildXlsx(m)).arrayBuffer());
-        const ws = wb.getWorksheet('Sheet1');
+        const ws = wb.getWorksheet(m.sheetName || 'Sheet1');
         if (m.spill) {
           want.forEach((v, i) => { const ref = String.fromCharCode(71 + (i % m.spill.cols)) + (5 + Math.floor(i / m.spill.cols)); ws.getCell(ref).value = i === 0 && ${withFormulas} ? { formula: m.solution.slice(1), result: v } : (v === '' ? null : v); });
         } else if (!m.fill) { ws.getCell(m.answerCell).value = ${withFormulas} ? { formula: m.solution.slice(1), result: want[0] } : want[0];
@@ -252,6 +282,9 @@ const inView = async (p, sel, name) => {
       await tap(p, `[data-pick="${wrong}"]`);
       ok(await until(p, `[...document.querySelectorAll('.mentor')].some((x) => /F1/.test(x.textContent))`), 'a wrong count gets a nudge toward F1');
       await tap(p, `[data-pick="${answer}"]`);
+      ok(await until(p, `window.__kicau.ST.closed.includes('1.8')`, 12000), '1.8 closes');
+      ok(!(await p.ev(`!!document.querySelector('.promo')`)), 'the promotion waits for Continue');
+      await pressContinue(p, 'phone 1.8', false);
       ok(await until(p, `!!document.querySelector('.promo')`, 12000), 'the promotion appears');
       await sleep(600);
       await p.shot('kicau-phone-promo');
@@ -262,6 +295,8 @@ const inView = async (p, sel, name) => {
       ok(await p.ev(`[...document.querySelectorAll('.row b')].filter((b) => /^Citra/.test(b.textContent)).length <= 1`), 'Citra is listed once');
     }
   }
+  ok(!(await p.ev(`!!document.querySelector('.promo')`)), 'the graduation waits for Continue');
+  await pressContinue(p, 'phone last request', false);
   ok(await until(p, `!!document.querySelector('.promo')`), 'the graduation screen appears');
   await sleep(500); await p.shot('kicau-phone-finale');
   await p.ev(`document.querySelector('.promo') && document.querySelector('.promo').remove()`);
@@ -305,6 +340,7 @@ const inView = async (p, sel, name) => {
   await locked(p, N + ' desk');
   await p.shot('kicau-laptop-home');
   for (const id of ['1.1', '1.2', '1.3', '1.4', '1.5']) {
+    await p.ev(`window.__kicau.ST.hold && window.__kicau.cont()`);
     const m = await p.ev(`(() => { const c = window.__kicau.current(); return { from: c.from, solution: c.solution }; })()`);
     await p.ev(`location.hash = '#chat-${m.from}'`);
     await until(p, `!document.querySelector('.typingb') && !!document.querySelector('#fx')`);
@@ -312,6 +348,7 @@ const inView = async (p, sel, name) => {
     await p.ev(`document.getElementById('send').click()`);
     ok(await until(p, `window.__kicau.ST.closed.includes('${id}')`), `${N} ${id} closes`);
   }
+  await p.ev(`window.__kicau.ST.hold && window.__kicau.cont()`);
   await p.ev(`location.hash = '#chat-tika'`);
   await until(p, `!document.querySelector('.typingb') && !!document.querySelector('#fx')`);
   /* Drag across cells to make a range, as with a mouse in Excel. */
@@ -347,6 +384,108 @@ const inView = async (p, sel, name) => {
   await p.ev(`location.hash = '#desk'`); await sleep(200);
   await p.shot('kicau-laptop-home-after');
   ok(p.errors.length === 0, 'no console errors on the laptop run', p.errors);
+}
+
+/* ---------- 3b. Chapter 11 on a laptop: several workbooks, review before Continue, the maximized sheet ---------- */
+{
+  const N = 'workbooks';
+  const p = await b.page();
+  await p.viewport(1366, 768, { mobile: false, dpr: 1 });
+  await openK(p, '/index.html?fast&reset');
+  await p.ev(`(() => { const i = document.getElementById('wname'); i.value = 'Rani'; i.dispatchEvent(new Event('input')); })()`);
+  await tap(p, '#go');
+  await ready(p);
+  /* Jump to Chapter 11: everything before it closed. */
+  await p.ev(`(() => { const K = window.__kicau; K.ST.closed = K.LIST.filter((m) => m.chapter !== 11).map((m) => m.id); K.ST.promoted = true; K.ST.hold = null; })()`);
+  const first = await p.ev(`window.__kicau.current().id`);
+  ok(first === '11.1', 'Chapter 11 starts at 11.1', first);
+  await p.ev(`location.hash = '#chat-bayu'`);
+  ok(await until(p, `!document.querySelector('.typingb') && !!document.querySelector('#fx')`, 15000), `${N}: 11.1 plays in`);
+  ok(await p.ev(`document.querySelectorAll('#bktabs .bk').length`) === 2, `${N}: one tab per open workbook`, await p.ev(`document.querySelectorAll('#bktabs .bk').length`));
+  await p.ev(`window.__kicau.setFormula('=D5*VLOOKUP(C5,')`);
+  await tap(p, '#bktabs [data-book="1"]');
+  ok(await until(p, `/SKU/.test(document.querySelector('#gw td[data-ref="A4"]').textContent)`), `${N}: the product master shows when its tab is tapped`);
+  ok(await p.ev(`document.getElementById('fx').value`) === '=D5*VLOOKUP(C5,', `${N}: switching workbooks keeps the formula`);
+  await p.shot('workbooks-other-book');
+  /* Drag across the price table, as with a mouse. */
+  const a = await p.ev(`(() => { const r = document.querySelector('#gw td[data-ref="A5"]').getBoundingClientRect(); return { x: r.left + 8, y: r.top + 8 }; })()`);
+  const z = await p.ev(`(() => { const r = document.querySelector('#gw td[data-ref="D16"]').getBoundingClientRect(); return { x: r.left + 8, y: r.top + 8 }; })()`);
+  await p.s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: a.x, y: a.y });
+  await p.s('Input.dispatchMouseEvent', { type: 'mousePressed', x: a.x, y: a.y, button: 'left', buttons: 1, clickCount: 1 });
+  await p.s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: z.x, y: z.y, button: 'left', buttons: 1 });
+  await p.s('Input.dispatchMouseEvent', { type: 'mouseReleased', x: z.x, y: z.y, button: 'left', buttons: 0, clickCount: 1 });
+  await sleep(120);
+  ok(await p.ev(`document.getElementById('fx').value`) === '=D5*VLOOKUP(C5,[master_produk.xlsx]Produk!$A$5:$D$16', `${N}: a range in another workbook is written as Excel writes it`, await p.ev(`document.getElementById('fx').value`));
+  ok(await p.ev(`document.querySelector('#gw td[data-ref="B9"]').className.includes('k')`), `${N}: the range lights up in the other workbook`);
+  await tap(p, '#bktabs [data-book="0"]');
+  ok(await until(p, `/Date/.test(document.querySelector('#gw td[data-ref="A4"]').textContent)`), `${N}: back to the sales lines`);
+  ok(!(await p.ev(`document.querySelector('#gw td[data-ref="B9"]').className.includes('k1')`)), `${N}: the other workbook's range is not drawn on this sheet`);
+  await tap(p, '#gw td[data-ref="D5"]');
+  /* Column letters in another workbook insert its whole column, pinned. */
+  await p.ev(`window.__kicau.setFormula('=')`);
+  await tap(p, '#bktabs [data-book="1"]');
+  await tap(p, '#gw button[data-col="D"]');
+  ok(await p.ev(`document.getElementById('fx').value`) === '=[master_produk.xlsx]Produk!$D$5:$D$16', `${N}: a column in another workbook`, await p.ev(`document.getElementById('fx').value`));
+  await tap(p, '#bktabs [data-book="0"]');
+  const files = await p.ev(`(async () => (await window.__kicau.buildBooks()).map((f) => f.filename + ':' + f.blob.size))()`);
+  ok(files.length === 2 && /^penjualan_q4\.xlsx:/.test(files[0]) && /^master_produk\.xlsx:/.test(files[1]), `${N}: Download for Excel gives both workbooks, with their real names`, files);
+  /* Maximize the sheet, then bring the chat back. */
+  const w0 = await p.ev(`document.getElementById('gw').getBoundingClientRect().width`);
+  await tap(p, '#dockmax');
+  ok(await p.ev(`document.querySelector('.lap').classList.contains('max') && getComputedStyle(document.querySelector('.chatcol')).display === 'none'`), `${N}: maximize hides the chat`);
+  const w1 = await p.ev(`document.getElementById('gw').getBoundingClientRect().width`);
+  ok(w1 > w0 + 400, `${N}: the maximized sheet is much wider`, [w0, w1]);
+  await p.ev(`window.__kicau.setFormula('=VLOOKUP(C5,[master_produk.xlsx]Produk!$A$5:$D$16,4,FALSE)')`);
+  await p.ev(`document.getElementById('send').click()`);
+  ok(await until(p, `document.getElementById('mini').classList.contains('unread') && /^(Bayu|Mbak Sari): /.test(document.getElementById('minitext').textContent)`), `${N}: while maximized, the newest reply shows on the small chat button`, await p.ev(`document.getElementById('minitext').textContent`));
+  await p.shot('workbooks-max');
+  await tap(p, '#minipill');
+  ok(await until(p, `document.getElementById('mini').classList.contains('open')`), `${N}: the small chat opens over the sheet`);
+  ok(await p.ev(`/Request 11\.1/.test(document.getElementById('miniask').textContent)`), `${N}: the small chat pins the request`);
+  ok(await p.ev(`[...document.querySelectorAll('#minilog .mm.me code')].some((c) => /VLOOKUP/.test(c.textContent)) && document.querySelectorAll('#minilog .mm:not(.me)').length > 0`), `${N}: the small chat shows the sent formula and the replies`);
+  await p.shot('workbooks-mini');
+  await tap(p, '#miniclose');
+  ok(await p.ev(`!document.getElementById('mini').classList.contains('open')`), `${N}: the small chat closes`);
+  await tap(p, '#dockmax');
+  ok(await p.ev(`!document.querySelector('.lap').classList.contains('max')`), `${N}: the chat comes back`);
+  await p.ev(`window.__kicau.setFormula(window.__kicau.current().solution)`);
+  await p.ev(`document.getElementById('send').click()`);
+  ok(await until(p, `window.__kicau.ST.closed.includes('11.1')`), `${N}: 11.1 closes`);
+  ok(await until(p, `!!document.querySelector('.dock.review .fxro')`), `${N}: the finished sheet stays up`);
+  await sleep(2200);
+  ok(await p.ev(`window.__kicau.ST.hold === '11.1' && !!document.querySelector('.dock.review')`), `${N}: nothing moves on without Continue`);
+  await p.shot('workbooks-review');
+  ok(p.errors.length === 0, `${N}: no console errors`, p.errors);
+}
+
+/* ---------- 3c. The opening: once per visit, skippable, calm with reduced motion ---------- */
+for (const [N, w, h, mobile] of [['opening phone', 390, 844, true], ['opening laptop', 1366, 768, false]]) {
+  const p = await b.page();
+  await p.viewport(w, h, { mobile, dpr: 1 });
+  if (mobile) await p.android();
+  const t0 = Date.now();
+  await p.go(BASE + '/index.html?reset', 0);
+  ok(await until(p, `!!document.getElementById('kc-intro')`, 3000), `${N}: the opening plays when the app opens`);
+  await sleep(1200);
+  await p.shot(N.replace(' ', '-') + '-mid');
+  ok(await until(p, `!document.getElementById('kc-intro')`, 7000), `${N}: the opening ends by itself`);
+  const took = Date.now() - t0;
+  ok(took < 6500, `${N}: the opening is short`, took);
+  ok(await until(p, `!!document.querySelector('.welcome')`), `${N}: it hands over to the welcome screen`);
+  await locked(p, N + ' after');
+  await p.go(BASE + '/index.html', 600);
+  ok(await p.ev(`!document.getElementById('kc-intro')`), `${N}: a reload in the same visit does not play it again`);
+  await p.go(BASE + '/index.html?intro', 0);
+  ok(await until(p, `!!document.getElementById('kc-intro')`, 3000), `${N}: ?intro plays it again`);
+  await sleep(700);
+  if (mobile) await tap(p, '#kc-intro'); else await p.s('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  ok(await until(p, `!document.getElementById('kc-intro')`, 900), `${N}: ${mobile ? 'a tap' : 'a key'} skips it`);
+  await p.s('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  const r0 = Date.now();
+  await p.go(BASE + '/index.html?intro', 0);
+  ok(await until(p, `!!document.getElementById('kc-intro')`, 3000), `${N}: reduced motion still shows the logo`);
+  ok(await until(p, `!document.getElementById('kc-intro')`, 4000) && Date.now() - r0 < 3500, `${N}: reduced motion is a short fade`, Date.now() - r0);
+  ok(p.errors.length === 0, `${N}: no console errors`, p.errors);
 }
 
 /* ---------- 4. The published artifact build: the engine from its own folder ---------- */

@@ -1,5 +1,5 @@
 /*
- * The formula engine: Formualizer 0.13.0 (MIT or Apache-2.0), loaded from a pinned CDN URL.
+ * The formula engine: Formualizer 0.13.0 (MIT or Apache-2.0), shipped in assets/engine/ (or a pinned CDN URL).
  * Its npm package is built for bundlers, so this wires up the WebAssembly by hand.
  * docs/ENGINE.md says why this engine was chosen and what it gets wrong.
  */
@@ -52,20 +52,61 @@ const parseRef = (a1) => {
   return { col: m[1].split('').reduce((a, c) => a * 26 + c.charCodeAt(0) - 64, 0), row: +m[2] };
 };
 
-/** A one-sheet workbook. `cells` is {A1: value or '=formula'}. */
+/*
+ * More than one sheet, and more than one workbook. A request's cells can carry extra sheets under SHEETS:
+ * [{ name, cells }]. A sheet of the same workbook is named as in Excel ("Targets"); a sheet of another open
+ * workbook is named "file.xlsx|Sheet", because the engine does not read Excel's external form
+ * [file.xlsx]Sheet!A1. toEngine() rewrites that form before a formula reaches the engine, so the learner
+ * types and sees exactly what Excel shows. MAIN names the request's own sheet (default Sheet1).
+ * Symbol keys are skipped by Object.entries and copied by Object.assign, so plain cell code is unaffected.
+ */
+const SHEETS = Symbol.for('kenari.sheets');
+const MAIN = Symbol.for('kenari.main');
+/** MATCH(x, range, FALSE): Excel reads FALSE as 0, an exact match; the engine reads it as approximate. */
+function exactMatch(f) {
+  let out = '', i = 0;
+  while (i < f.length) {
+    const at = f.slice(i).search(/(^|[^A-Za-z.])MATCH\(/i);
+    if (at < 0) { out += f.slice(i); break; }
+    const open = i + at + f.slice(i + at).indexOf('(') + 1;
+    out += f.slice(i, open);
+    let depth = 1, j = open, inQ = false, comma = [];
+    for (; j < f.length && depth; j++) {
+      const c = f[j];
+      if (c === '"') inQ = !inQ;
+      else if (!inQ && c === '(') depth++;
+      else if (!inQ && c === ')') depth--;
+      else if (!inQ && c === ',' && depth === 1) comma.push(j);
+    }
+    const close = j - 1;
+    let inner = f.slice(open, close);
+    if (comma.length === 2 && /^\s*FALSE\s*$/i.test(f.slice(comma[1] + 1, close))) inner = f.slice(open, comma[1] + 1) + '0';
+    out += exactMatch(inner) + ')';
+    i = close + 1;
+  }
+  return out;
+}
+const toEngine = (f) => exactMatch(String(f).replace(/'?\[([^\]]+)\]([^'!]+)'?!/g, (m, book, sheet) => "'" + book + '|' + sheet + "'!"));
+
+/** A workbook with the request's sheet, plus any extra sheets. `cells` is {A1: value or '=formula'}. */
 class Book {
   constructor(api, cells) {
     this.wb = new api.Workbook();
-    this.wb.addSheet('Sheet1');
+    this.main = cells[MAIN] || 'Sheet1';
+    this.wb.addSheet(this.main);
+    for (const sh of cells[SHEETS] || []) {
+      this.wb.addSheet(sh.name);
+      for (const [ref, v] of Object.entries(sh.cells)) this.set(ref, v, sh.name);
+    }
     for (const [ref, v] of Object.entries(cells)) this.set(ref, v);
   }
-  set(ref, v) {
+  set(ref, v, sheet) {
     const { row, col } = parseRef(ref);
-    if (typeof v === 'string' && v[0] === '=') this.wb.setFormula('Sheet1', row, col, v);
-    else this.wb.setValue('Sheet1', row, col, v);
+    if (typeof v === 'string' && v[0] === '=') this.wb.setFormula(sheet || this.main, row, col, toEngine(v));
+    else this.wb.setValue(sheet || this.main, row, col, v);
   }
   calc() { this.wb.evaluateAll(); }
-  get(ref) { const { row, col } = parseRef(ref); return plain(this.wb.sheet('Sheet1').getValue(row, col)); }
+  get(ref) { const { row, col } = parseRef(ref); return plain(this.wb.sheet(this.main).getValue(row, col)); }
   close() { try { this.wb.free(); } catch (e) { /* already gone */ } }
 }
 
@@ -116,7 +157,7 @@ function evalSpill(api, cells, at, formula, cols, rows) {
     b.set(at, formula);
     b.calc();
     const out = [];
-    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) out.push(plain(b.wb.sheet('Sheet1').getValue(row + r, col + c)));
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) out.push(plain(b.wb.sheet(b.main).getValue(row + r, col + c)));
     return out;
   } catch (e) {
     return ['#PARSE'];
@@ -125,4 +166,4 @@ function evalSpill(api, cells, at, formula, cols, rows) {
   }
 }
 
-export { load, Book, evalOn, evalFill, evalSpill, plain, VERSION };
+export { load, Book, evalOn, evalFill, evalSpill, plain, toEngine, SHEETS, MAIN, VERSION };

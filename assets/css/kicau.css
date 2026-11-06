@@ -514,7 +514,8 @@ table.gx{border-collapse:separate;border-spacing:0;font:400 13.5px/1.2 var(--mon
   .mac-acts{padding:12px 14px 14px;justify-content:flex-end}
   .mac-acts .btn{flex:none;min-width:200px}
   .page h1{margin-top:0}
-  .toast{left:auto;right:16px;top:14px;translate:none;width:380px}
+  /* Bottom left, over the chat list, so it never covers the workbook's tabs, Download or Maximize. */
+  .toast{left:88px;right:auto;top:auto;bottom:16px;translate:none;width:340px;animation:pop-in .35s cubic-bezier(.2,1.2,.4,1) both}
 }
 @media (max-width:999px){
   .chatwrap{display:flex;flex-direction:column;height:100%;min-height:0}
@@ -642,3 +643,63 @@ table.pt{font:400 15px var(--xl-font)}
 }
 /* Last word on ligatures: the font shorthands above reset them, which drew <= as ≤ in the chips. Formulas always show the characters typed. */
 code,.code,.chip,.keys button,.fxbox input,.fxbox .paint,table.gx,.code-v,.ans,table.pt{font-variant-ligatures:none;font-feature-settings:"liga" 0,"calt" 0}
+
+/* ===================== Several workbooks, review before Continue, and the maximized sheet ===================== */
+/* Workbook tabs in the green title bar, one per open file. */
+.bktabs{flex:1;min-width:0;display:flex;align-items:flex-end;gap:2px;align-self:stretch;overflow-x:auto;scrollbar-width:none;padding-top:6px}
+.bktabs::-webkit-scrollbar{display:none}
+.bk{flex:none;display:flex;align-items:center;gap:6px;max-width:220px;min-height:38px;padding:0 12px;border-radius:8px 8px 0 0;font:600 12.5px var(--sans);color:rgba(255,255,255,.82);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bk .xl{width:16px;height:16px;font-size:10px;line-height:16px;background:rgba(255,255,255,.9)}
+.bk:hover{background:rgba(255,255,255,.1)}
+.bk.on{background:var(--xs-bar);color:var(--xs-ink)}
+.bk.on .xl{background:var(--xs-green);color:#fff}
+/* Sheet tabs become buttons when a workbook has more than one sheet. */
+.sheettabs{overflow-x:auto;scrollbar-width:none}
+.sheettabs::-webkit-scrollbar{display:none}
+.sheettabs button.st{flex:none;display:flex;align-items:center;padding:0 16px;min-height:32px;font:400 13.5px var(--xl-font);color:var(--xs-hd-ink)}
+.sheettabs button.st.on{background:var(--xs-cell);color:var(--xs-green);font-weight:700;box-shadow:inset 0 -3px 0 var(--xs-green)}
+[data-v="c"] .sheettabs button.st.on{color:var(--xs-act);box-shadow:inset 0 -3px 0 var(--xs-act)}
+@media (pointer:coarse){.sheettabs{height:40px}.sheettabs button.st{min-height:40px}}
+/* The finished sheet, read-only, waiting for Continue. */
+.fbar.ro .fxro{flex:1;min-width:0;align-self:center;padding:0 10px;font:400 16px var(--xl-font);color:var(--xs-ink);white-space:nowrap;overflow-x:auto;scrollbar-width:none}
+.review .comp{gap:10px}
+.review .rv{font-size:12.5px;color:var(--ink-3);font-weight:600}
+.review .page .empty{display:flex;gap:8px;align-items:center}
+.review .page .empty .ic{width:20px;height:20px;color:var(--ok)}
+/* Maximize on a laptop: the chat list and the chat step aside, the rail stays. */
+#dockmax{position:relative}
+#dockmax.unread::after{content:"";position:absolute;top:8px;right:8px;width:9px;height:9px;border-radius:50%;background:#EF4444;box-shadow:0 0 0 2px var(--xs-green)}
+@media (min-width:1000px){
+  /* A hidden grid child gives up its cell, so the grids shrink to the columns that stay. */
+  .lap.max{grid-template-columns:72px minmax(0,1fr)}
+  .lap.max .side{display:none}
+  .lap.max .chatwrap{grid-template-columns:minmax(0,1fr)}
+  .lap.max .chatcol{display:none}
+  .lap.max .gx td{max-width:260px}
+}
+.dock{position:relative}
+/* The small chat window over an expanded sheet. */
+.mini{display:none;position:absolute;z-index:6;right:12px;top:106px}
+.lap.max .mini,.dock.full .mini{display:block}
+@media (min-width:1000px){.mini{top:100px;right:18px}}
+.mini-pill{position:relative;display:flex;align-items:center;gap:8px;max-width:min(380px,calc(100vw - 40px));min-height:44px;padding:6px 16px 6px 6px;border-radius:999px;background:var(--surface);color:var(--ink);font:600 13.5px var(--sans);text-align:left;box-shadow:0 12px 30px -12px rgba(0,0,0,.4),0 0 0 1px var(--line)}
+.mini-pill .mp-t{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mini-pill .dot{display:none;position:absolute;top:3px;left:28px;width:11px;height:11px;border-radius:50%;background:#EF4444;box-shadow:0 0 0 2px var(--surface)}
+.mini.unread .mini-pill{box-shadow:0 12px 30px -12px rgba(0,0,0,.4),0 0 0 2px var(--brand)}
+.mini.unread .mini-pill .dot{display:block}
+.mini.open .mini-pill{display:none}
+.mini-win{display:none;flex-direction:column;width:min(360px,calc(100vw - 24px));max-height:min(440px,52vh);border-radius:16px;background:var(--surface);color:var(--ink);box-shadow:0 20px 48px -16px rgba(0,0,0,.45),0 0 0 1px var(--line);overflow:hidden;animation:pop-in .25s both}
+.mini.open .mini-win{display:flex}
+.mini-hd{flex:none;display:flex;align-items:center;gap:8px;padding:6px 4px 6px 10px;border-bottom:1px solid var(--line)}
+.mini-hd b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.mini-hd .icb{width:40px;height:40px;font-size:22px;line-height:1}
+.mini-ask{flex:none;padding:8px 12px;font-size:12.5px;line-height:1.45;background:var(--brand-soft);color:var(--ink)}
+.mini-ask:empty{display:none}
+.mini-log{flex:1;min-height:0;overflow:auto;padding:10px 12px 12px;display:flex;flex-direction:column;gap:6px;overscroll-behavior:contain}
+.mm{align-self:flex-start;max-width:92%;padding:6px 10px;border-radius:12px;background:var(--surface-2);font-size:13px;line-height:1.4;overflow-wrap:anywhere}
+.mm b{margin-right:4px}
+.mm i{font-style:normal;font-weight:700}
+.mm.me{align-self:flex-end;background:var(--me);color:var(--me-ink)}
+.mm code{font:500 12px var(--mono);font-variant-ligatures:none}
+.mm.sys{align-self:center;display:flex;align-items:center;gap:6px;background:var(--ok-soft);color:var(--ok);font-weight:700}
+.mm.sys .ic{width:16px;height:16px}
