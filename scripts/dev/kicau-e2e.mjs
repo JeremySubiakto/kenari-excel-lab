@@ -488,6 +488,48 @@ for (const [N, w, h, mobile] of [['opening phone', 390, 844, true], ['opening la
   ok(p.errors.length === 0, `${N}: no console errors`, p.errors);
 }
 
+/* ---------- 3d. Practice: 500 problems, easy to hard, judged on a hidden test too ---------- */
+for (const [N, w, h, mobile] of [['practice laptop', 1366, 768, false], ['practice phone', 390, 844, true]]) {
+  const p = await b.page();
+  await p.viewport(w, h, { mobile, dpr: mobile ? 2 : 1 });
+  if (mobile) await p.android();
+  await openK(p, '/index.html?fast&reset');
+  await p.ev(`(() => { const i = document.getElementById('wname'); i.value = 'Rani'; i.dispatchEvent(new Event('input')); })()`);
+  await tap(p, '#go');
+  await ready(p);
+  await p.ev(`location.hash = '#practice'`);
+  ok(await until(p, `document.querySelectorAll('#plist .pr-row').length === 500`, 15000), `${N}: the list shows 500 problems`, await p.ev(`document.querySelectorAll('#plist .pr-row').length`));
+  ok(await p.ev(`[...document.querySelectorAll('#plist .pr-row .pt')].every((t) => !/^Problem \d+$/.test(t.textContent))`), `${N}: every problem has its title`);
+  const order = await p.ev(`[...document.querySelectorAll('#plist .pr-row .pd')].map((d) => d.textContent)`);
+  const rank = { Easy: 0, Medium: 1, Hard: 2 };
+  ok(order.every((d, i) => i === 0 || rank[d] >= rank[order[i - 1]]), `${N}: the list runs from easy to hard`);
+  await locked(p, N + ' list');
+  await p.shot(N.replace(' ', '-') + '-list');
+  await tap(p, '[data-f="d"][data-v="Hard"]');
+  ok(await p.ev(`document.querySelectorAll('#plist .pr-row').length`) === 120, `${N}: the Hard filter shows 120`, await p.ev(`document.querySelectorAll('#plist .pr-row').length`));
+  await tap(p, '[data-f="d"][data-v="All"]');
+  await p.ev(`(() => { const q = document.getElementById('pq'); q.value = 'VLOOKUP'; q.dispatchEvent(new Event('input')); })()`);
+  ok(await p.ev(`document.querySelectorAll('#plist .pr-row').length > 0 && document.querySelectorAll('#plist .pr-row').length < 500`), `${N}: search narrows the list`);
+  for (const n of [1, 210, 500]) {
+    await p.ev(`location.hash = '#p-${n}'`);
+    ok(await until(p, `!!document.getElementById('fx') && window.__kicau.UI.prac && window.__kicau.UI.prac.n === ${n}`), `${N}: problem ${n} opens`);
+    await p.ev(`window.__kicau.setFormula('=1')`);
+    await p.ev(`document.getElementById('send').click()`);
+    ok(await until(p, `!!document.querySelector('#pres .verdict.bad')`), `${N}: problem ${n} refuses a wrong answer`);
+    await p.ev(`window.__kicau.setFormula(window.__kicau.UI.prac.solution)`);
+    await p.ev(`document.getElementById('send').click()`);
+    ok(await until(p, `!!document.querySelector('#pres .verdict.ok') && !!document.querySelector('#psol pre.code')`), `${N}: problem ${n} accepts its solution and shows the explanation`);
+    if (n === 210) { await locked(p, N + ' problem'); await inView(p, '#send', N + ' problem'); await p.shot(N.replace(' ', '-') + '-problem'); }
+  }
+  ok(await p.ev(`Object.keys(window.__kicau.PR().solved).length`) === 3, `${N}: three problems saved as solved`);
+  await p.ev(`location.hash = '#practice'`);
+  await until(p, `!!document.getElementById('pq')`);
+  ok(await p.ev(`document.getElementById('pq').value`) === 'VLOOKUP', `${N}: the list keeps your search when you come back`);
+  await p.ev(`(() => { const q = document.getElementById('pq'); q.value = ''; q.dispatchEvent(new Event('input')); })()`);
+  ok(await until(p, `document.querySelectorAll('#plist .pr-row.done').length === 3`), `${N}: the list ticks the solved ones`);
+  ok(p.errors.length === 0, `${N}: no console errors`, p.errors);
+}
+
 /* ---------- 4. The published artifact build: the engine from its own folder ---------- */
 {
   const p = await b.page();

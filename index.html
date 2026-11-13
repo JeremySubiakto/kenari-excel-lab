@@ -20,6 +20,19 @@
 <meta name="theme-color" content="#F2B705">
 <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
 <script>
+/* When the opening will play, the first paint is already its dark stage, so the light page never flashes first. */
+(function () {
+  try {
+    var q = location.search;
+    if (/[?&](fast|nointro)(&|=|$)/.test(q) || (matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
+    var seen = false; try { seen = sessionStorage.getItem('kicau.intro') === '1'; } catch (e) { /* storage blocked */ }
+    if (seen && !/[?&]intro(&|=|$)/.test(q)) return;
+    document.documentElement.classList.add('kc-pre');
+  } catch (e) { /* no cover, no harm */ }
+})();
+</script>
+<style>html.kc-pre,html.kc-pre body{background:radial-gradient(55% 45% at 88% 6%,rgba(46,107,214,.13),rgba(46,107,214,0) 70%),radial-gradient(50% 45% at 6% 96%,rgba(194,69,58,.11),rgba(194,69,58,0) 70%),#1C1A14!important;min-height:100%}html.kc-pre #app{visibility:hidden}</style>
+<script>
 /* The learner's mood is applied before anything paints, so there is no flash of the wrong colors. */
 (function () {
   var m = 'b'; /* Kenari Yellow is the default mood until the learner picks another. */

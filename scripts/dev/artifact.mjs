@@ -34,6 +34,10 @@ for (const f of ENGINE) {
 const wasm = fs.readFileSync(path.join(OUT, 'vendor', ENGINE[1]));
 if (wasm.readUInt32BE(0) !== 0x0061736d) throw new Error('The engine file is not WebAssembly');
 for (const f of FILES) { fs.mkdirSync(path.dirname(path.join(OUT, f)), { recursive: true }); fs.copyFileSync(path.join(ROOT, f), path.join(OUT, f)); }
+/* The practice problems load on demand from assets/js/kicau/practice/, so the whole folder ships. */
+const PDIR = 'assets/js/kicau/practice';
+fs.mkdirSync(path.join(OUT, PDIR), { recursive: true });
+for (const f of fs.readdirSync(path.join(ROOT, PDIR))) if (f.endsWith('.js') && !f.startsWith('.')) fs.copyFileSync(path.join(ROOT, PDIR, f), path.join(OUT, PDIR, f));
 
 const src = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 const head = src.slice(src.indexOf('<head>') + 6, src.indexOf('</head>'));

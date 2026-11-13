@@ -147,5 +147,10 @@ const battery = require('node:child_process').spawnSync(process.execPath, ['--no
 const last = (battery.stdout || '').trim().split('\n').pop();
 ok(battery.status === 0, 'every formula request passes the answer battery: ' + last, (battery.stdout || '').split('\n').filter((l) => l.startsWith('FAIL')).slice(0, 5));
 
+/* ---------- The 500 practice problems, on the real engine ---------- */
+const practice = require('node:child_process').spawnSync(process.execPath, ['--no-warnings', path.join(ROOT, 'scripts/dev/check-practice.mjs')], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+const plast = (practice.stdout || '').trim().split('\n').pop();
+ok(practice.status === 0, 'every practice problem passes its checks: ' + plast, (practice.stdout || '').split('\n').filter((l) => l.startsWith('FAIL')).slice(0, 5));
+
 console.log(`${passes} passed, ${fails} failed`);
 process.exit(fails ? 1 : 0);

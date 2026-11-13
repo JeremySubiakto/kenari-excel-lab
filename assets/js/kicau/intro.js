@@ -154,6 +154,9 @@
     var anims = [], over = false, leaving = false, armed = false, timer = 0, remeasure = null;
 
     function A(el, kf, at, dur, ease, fill) {
+      /* Give moving and fading pieces their own GPU layer up front, so the first frame of each move does not stall. */
+      var k0 = kf && kf[0];
+      if (k0 && (k0.transform !== undefined || k0.opacity !== undefined) && !el.style.willChange) el.style.willChange = k0.transform !== undefined ? 'transform, opacity' : 'opacity';
       var a = el.animate(kf, { delay: at || 0, duration: Math.max(1, dur), easing: ease || 'linear', fill: fill || 'both' });
       anims.push(a);
       return a;
@@ -342,7 +345,7 @@
         top('k3-solo') +
       '</div>' + SKIP);
 
-    /* wait at most 70 ms for the typefaces (usually already cached), so the whole intro still ends within 4.4 s */
+    /* Wait for the typefaces (at most 500 ms on a first visit; cached afterwards), so text never changes font mid-move. */
     var fontsP = Promise.resolve();
     try {
       if (d.fonts && d.fonts.load) {
@@ -350,13 +353,22 @@
           .map(function (s) { return d.fonts.load(s).catch(function () {}); }));
       }
     } catch (e) { /* no font loading API */ }
-    Promise.race([fontsP, new Promise(function (res) { setTimeout(res, 70); })]).then(function () {
-      if (over || leaving) return;
-      try { play(); } catch (err) { end(); if (W.console) console.error('kcIntro', err); }
+    /* Then wait for the page to go quiet (the app finishing its start-up), so the first moves never stutter.
+       Until then the still first frame, the dark stage, is on screen. */
+    var calm = function (fn) {
+      var go = function () { requestAnimationFrame(function () { requestAnimationFrame(fn); }); };
+      if (W.requestIdleCallback) W.requestIdleCallback(go, { timeout: 250 }); else setTimeout(go, 80);
+    };
+    Promise.race([fontsP, new Promise(function (res) { setTimeout(res, 500); })]).then(function () {
+      calm(function () {
+        if (over || leaving) return;
+        try { play(); } catch (err) { end(); if (W.console) console.error('kcIntro', err); }
+      });
     });
     return ctl;
 
     function play() {
+      try { performance.mark('kc-intro-play'); } catch (e) { /* no performance marks */ }
       var $ = function (s) { return root.querySelector(s); };
       var $$ = function (s) { return Array.prototype.slice.call(root.querySelectorAll(s)); };
       var BR = function (el) { return el.getBoundingClientRect(); };
@@ -418,8 +430,8 @@
       var GOLD = RESULT + 30, GD = 170;   // the answer cell fills with gold
       var MORPH = RESULT + 230, MD = 220; // and reshapes into the canary
       var T0 = MORPH + MD;               // the canary takes off
-      var LAND = T0 + 620;               // and perches in the lockup
-      var CURT = LAND + 740;             // the curtain tears open
+      var LAND = T0 + 760;               // and perches in the lockup (one continuous flight, turns included)
+      var CURT = LAND + 640;             // the curtain tears open
       var END = CURT + 400;
 
       stage.style.visibility = 'visible';
@@ -741,20 +753,27 @@
       /* the canary takes over from the gold shape exactly where the camera push left it */
       var s0 = 24 * u * Z / D, LR = LAND - T0, ER = END - T0;
       var bx0 = ex + PX + (bcx - ex) * Z, by0 = ey + PY + (bcy - ey) * Z;
-      /* the flight, as four tracks: x, y, turn and scale, squash */
+      /* The flight, as tracks: x, y, and turn plus scale (the squash and wings ride on their own).
+         One continuous flight that never leaves the screen: the canary lifts off the answer cell, rises, turns around
+         at the top of its arc (its width passes through zero, which reads as a turn), glides down toward the lockup,
+         turns back to face "Kicau" as it brakes, and perches. Over the sheet it shows gold; over the yellow it shows ink. */
       function flight(mm) {
         var h = D / 2, k = mm.k;
-        var xin = -(mm.s * 1.3) * .75 - 24, yin = mm.sy - mm.vh * .3, big = s0 * 1.7 * D;
+        var sApex = Math.max(s0 * 1.25, k * .78);
+        var half = D * sApex * .6;
+        var ax = Math.min(bx0 + mm.vw * .05, mm.vw - half), ay = Math.max(half, Math.min(by0, mm.sy) - mm.vh * .2);
+        var px = mm.sx + mm.s * .4, py = mm.sy - mm.vh * .11;
         var X = function (v) { return { transform: 'translateX(' + (v - h).toFixed(1) + 'px)' }; };
         var Y = function (v) { return { transform: 'translateY(' + (v - h).toFixed(1) + 'px)' }; };
-        var Rt = function (r, s) { return { transform: 'rotate(' + r + 'deg) scale(' + s.toFixed(4) + ')' }; };
+        var Rt = function (r, s, dir) { return { transform: 'rotate(' + r + 'deg) scale(' + ((dir || 1) * s).toFixed(4) + ',' + s.toFixed(4) + ')' }; };
         return {
-          fx: kfs([[0, X(bx0), 'cubic-bezier(.3,0,.2,1)'], [80, X(bx0 - .05 * s0 * D), 'cubic-bezier(.42,0,.7,.55)'], [300, X(mm.vw + .7 * big)], [301, X(xin)],
-            [320, X(xin), 'cubic-bezier(.12,.8,.3,1)'], [LR, X(mm.sx)], [ER, X(mm.sx)]]),
-          fy: kfs([[0, Y(by0), 'cubic-bezier(.3,0,.2,1)'], [80, Y(by0 + .04 * s0 * D), 'cubic-bezier(.25,.5,.45,1)'], [300, Y(by0 - mm.vh * .3)], [301, Y(yin)],
-            [320, Y(yin), 'cubic-bezier(.5,0,.25,1)'], [LR, Y(mm.sy)], [ER, Y(mm.sy)]]),
-          fr: kfs([[0, Rt(0, s0), 'cubic-bezier(.3,0,.2,1)'], [80, Rt(5, s0), 'cubic-bezier(.2,.6,.3,1)'], [180, Rt(-18, s0 * 1.4), 'cubic-bezier(.4,0,.7,.4)'], [300, Rt(-26, s0 * 1.7)],
-            [301, Rt(16, k * 1.3)], [320, Rt(16, k * 1.3), 'cubic-bezier(.4,0,.4,1)'], [LR - 140, Rt(-14, k * 1.06), 'cubic-bezier(.3,1.5,.5,1)'], [LR + 50, Rt(0, k)], [ER, Rt(0, k)]])
+          fx: kfs([[0, X(bx0), 'cubic-bezier(.3,0,.2,1)'], [70, X(bx0 - .05 * s0 * D), 'cubic-bezier(.3,.1,.3,1)'], [210, X(ax), 'cubic-bezier(.4,0,.6,1)'],
+            [290, X(ax - mm.vw * .02), 'cubic-bezier(.35,0,.4,1)'], [560, X(px), 'cubic-bezier(.3,0,.3,1)'], [665, X(mm.sx + mm.s * .08), 'cubic-bezier(.3,0,.2,1)'], [LR, X(mm.sx)], [ER, X(mm.sx)]]),
+          fy: kfs([[0, Y(by0), 'cubic-bezier(.3,0,.2,1)'], [70, Y(by0 + .04 * s0 * D), 'cubic-bezier(.2,.6,.4,1)'], [210, Y(ay), 'cubic-bezier(.4,0,.6,1)'],
+            [290, Y(ay - mm.vh * .01), 'cubic-bezier(.45,0,.55,1)'], [560, Y(py), 'cubic-bezier(.3,0,.3,1)'], [665, Y(mm.sy - mm.vh * .025), 'cubic-bezier(.4,0,.2,1)'], [LR, Y(mm.sy)], [ER, Y(mm.sy)]]),
+          fr: kfs([[0, Rt(0, s0, 1), 'cubic-bezier(.3,0,.2,1)'], [70, Rt(4, s0, 1), 'cubic-bezier(.2,.6,.3,1)'], [210, Rt(-18, sApex, 1), 'cubic-bezier(.5,0,.5,1)'],
+            [290, Rt(-6, sApex * 1.02, -1), 'cubic-bezier(.3,0,.4,1)'], [560, Rt(-10, k * 1.08, -1), 'cubic-bezier(.5,0,.5,1)'], [665, Rt(-4, k * 1.06, 1), 'cubic-bezier(.3,1.5,.5,1)'],
+            [LR + 50, Rt(0, k, 1)], [ER, Rt(0, k, 1)]])
         };
       }
       var SQ = function (a, b) { return { transform: 'scale(' + a + ',' + b + ')' }; };

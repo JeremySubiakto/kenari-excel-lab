@@ -35,13 +35,16 @@ const strip = (h) => String(h).replace(/<[^>]+>/g, '').replace(/&amp;/g, '&');
 
 /* ---------- Saved progress ---------- */
 const KEY = 'kicau.v1';
-const fresh = () => ({ v: 1, name: '', mood: '', started: '', logs: {}, missions: {}, closed: [], coffee: { day: '', used: 0 }, days: [], opened: {}, promoted: false });
+const fresh = () => ({ v: 1, name: '', mood: '', started: '', logs: {}, missions: {}, closed: [], coffee: { day: '', used: 0 }, days: [], opened: {}, promoted: false, practice: { solved: {}, tried: {} } });
 let ST;
 try { ST = Object.assign(fresh(), JSON.parse(localStorage.getItem(KEY) || 'null') || {}); } catch (e) { ST = fresh(); }
 if (Q.has('reset')) { ST = fresh(); try { localStorage.removeItem(KEY); } catch (e) { /* private mode */ } }
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(ST)); } catch (e) { /* private mode: progress lasts this visit */ } };
 const MST = (id) => (ST.missions[id] = ST.missions[id] || { attempts: 0, coffees: 0, hint: 0, draft: '', started: false, solved: null });
 const logOf = (p) => (ST.logs[p] = ST.logs[p] || []);
+const PR = () => (ST.practice = ST.practice && ST.practice.solved ? ST.practice : { solved: {}, tried: {} });
+/* The formula being typed belongs to a practice problem when one is open, otherwise to the current request. */
+const activeM = () => UI.prac || current();
 
 /* ---------- Progress helpers ---------- */
 const isClosed = (m) => ST.closed.includes(m.id);
@@ -69,11 +72,14 @@ function greeting() { const h = new Date().getHours(); return h < 11 ? 'Selamat 
 
 /* ---------- The formula engine ---------- */
 const ENG = { api: null, failed: false, ex: {} };
-const enginePromise = load().then((api) => {
+/* The engine (10 MB) waits until the opening ends or is skipped, so it never competes with the animation for the
+   CPU. Nobody needs it before the welcome screen, and it loads while they type their name. */
+let engineGo;
+const engineGate = new Promise((r) => { engineGo = r; });
+const enginePromise = engineGate.then(load).then((api) => {
   ENG.api = api;
   document.documentElement.dataset.engine = 'ready';
   document.documentElement.dataset.engineMs = api.loadMs;
-  for (const m of LIST) if (m.kind === 'formula' && m.lesson.exFormula) ENG.ex[m.id] = evalOn(api, m.cells, 'Z1', m.lesson.exFormula);
   document.querySelectorAll('[data-exres]').forEach(paintExample);
   const e = $('#engmsg'); if (e) e.hidden = true;
   if (UI.pendingSend) { UI.pendingSend = false; send(); }
@@ -86,7 +92,10 @@ const enginePromise = load().then((api) => {
   console.warn('Engine load failed', err);
 });
 function paintExample(el) {
-  const v = ENG.ex[el.dataset.exres];
+  /* A lesson's example result is worked out the first time the lesson shows, not for all 97 at start-up. */
+  const id = el.dataset.exres;
+  if (ENG.ex[id] === undefined && ENG.api && byId[id] && byId[id].lesson && byId[id].lesson.exFormula) ENG.ex[id] = evalOn(ENG.api, byId[id].cells, 'Z1', byId[id].lesson.exFormula);
+  const v = ENG.ex[id];
   const L = byId[el.dataset.exres].lesson;
   if (v !== undefined) el.innerHTML = `Its result: <b>${esc(L.exDate && typeof v === 'number' ? dateText(v) : fmt(v))}</b>${L.exLabel ? ' ' + esc(L.exLabel) : ''}.`;
 }
@@ -135,12 +144,12 @@ const unreadCount = () => threadList().filter((r) => r.unread).length;
 function rail(on) {
   const n = unreadCount();
   const a = (href, id, label, key) => `<a href="${href}" class="${on === key ? 'on' : ''}" aria-label="${label}" title="${label}">${I(id)}${key === 'chats' && n ? `<i class="n">${n}</i>` : ''}</a>`;
-  return `<nav class="rail" aria-label="Kicau"><span class="logo" style="color:var(--brand)">${I('bird')}</span>${a('#desk', 'chat', 'Chats', 'chats')}${a('#notes', 'note', 'Notes', 'notes')}${a('#career', 'brief', 'Career', 'career')}${a('#you', 'user', 'You', 'me')}<a class="me" href="#you" aria-label="You">${avatar('me', 38)}</a></nav>`;
+  return `<nav class="rail" aria-label="Kicau"><span class="logo" style="color:var(--brand)">${I('bird')}</span>${a('#desk', 'chat', 'Chats', 'chats')}${a('#practice', 'target', 'Practice', 'practice')}${a('#notes', 'note', 'Notes', 'notes')}${a('#career', 'brief', 'Career', 'career')}${a('#you', 'user', 'You', 'me')}<a class="me" href="#you" aria-label="You">${avatar('me', 38)}</a></nav>`;
 }
 function tabs(on) {
   const n = unreadCount();
   const a = (href, id, label, key) => `<a href="${href}" class="${on === key ? 'on' : ''}">${I(id)}${label}${key === 'chats' && n ? `<i class="n">${n}</i>` : ''}</a>`;
-  return `<nav class="tabs" aria-label="Kicau">${a('#desk', 'chat', 'Chats', 'chats')}${a('#notes', 'note', 'Notes', 'notes')}${a('#career', 'brief', 'Career', 'career')}${a('#you', 'user', 'You', 'me')}</nav>`;
+  return `<nav class="tabs" aria-label="Kicau">${a('#desk', 'chat', 'Chats', 'chats')}${a('#practice', 'target', 'Practice', 'practice')}${a('#notes', 'note', 'Notes', 'notes')}${a('#career', 'brief', 'Career', 'career')}${a('#you', 'user', 'You', 'me')}</nav>`;
 }
 function side() {
   const n = ST.closed.length, nx = nextRank(n), rk = rankOf(n);
@@ -152,8 +161,10 @@ function side() {
     ${ST.promoted ? '' : `<h2 class="sec">Bank Kenari</h2>${bankLockRow()}`}</div></aside>`;
 }
 function shell(on, inner) {
-  if (LAP.matches) return `<div class="lap${UI.max && on === 'chat' ? ' max' : ''}">${rail(on)}${side()}<main class="main">${inner}</main></div>`;
-  return `<div class="ph">${inner}${on === 'chat' ? '' : tabs(on)}</div>`;
+  /* A practice problem works like a chat: full height on a phone (no bottom tabs), Practice lit in the rail. */
+  const nav = on === 'prob' ? 'practice' : on;
+  if (LAP.matches) return `<div class="lap${UI.max && (on === 'chat' || on === 'prob') ? ' max' : ''}">${rail(nav)}${side()}<main class="main">${inner}</main></div>`;
+  return `<div class="ph">${inner}${on === 'chat' || on === 'prob' ? '' : tabs(nav)}</div>`;
 }
 function ring(n, of, cls) {
   const r = 26, c = 2 * Math.PI * r, p = of ? Math.min(1, n / of) : 1;
@@ -643,7 +654,7 @@ function paint() {
   p.scrollLeft = inp.scrollLeft;
   /* Tint the cells each reference points at, in the same color, as Excel does while you edit. */
   document.querySelectorAll('#gw td').forEach((td) => td.classList.remove('k0', 'k1', 'k2', 'k3', 'kt', 'kb', 'one'));
-  const cm = current();
+  const cm = activeM();
   const inView = (r) => {
     if (!cm || !cm.books) return !r.sheet;
     const { book, sheet } = viewSheet(cm);
@@ -672,7 +683,7 @@ function setFormula(f) {
 }
 function afterEdit() {
   const inp = $('#fx');
-  const m = current();
+  const m = activeM();
   if (m && inp) { MST(m.id).draft = inp.value; save(); }
   paint();
 }
@@ -714,7 +725,7 @@ function wireDock(m) {
   inp.addEventListener('scroll', () => { $('#paint').scrollLeft = inp.scrollLeft; });
   inp.addEventListener('keyup', () => { $('#paint').scrollLeft = inp.scrollLeft; });
   inp.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); send(); }
+    if (e.key === 'Enter') { e.preventDefault(); if (UI.prac) submitPractice(UI.prac); else send(); }
     if (e.key === 'F4') { e.preventDefault(); cycleAbs(); }
   });
   if (!coarse) setTimeout(() => { inp.focus({ preventScroll: true }); inp.setSelectionRange(inp.value.length, inp.value.length); }, 0);
@@ -757,9 +768,9 @@ function wireDock(m) {
       }
     });
   }
-  $('#send').onclick = send;
-  $('#coffee').onclick = coffee;
-  $('#grab').onclick = () => setDock(UI.dock === 'open' ? 'full' : UI.dock === 'full' ? 'min' : 'open');
+  $('#send').onclick = () => (UI.prac ? submitPractice(UI.prac) : send());
+  if ($('#coffee')) $('#coffee').onclick = coffee;
+  if ($('#grab')) $('#grab').onclick = () => setDock(UI.dock === 'open' ? 'full' : UI.dock === 'full' ? 'min' : 'open');
   const big = $('#dockbig');
   if (big) big.onclick = () => setDock(UI.dock === 'full' ? 'open' : 'full');
   inp.addEventListener('focus', () => { if (!LAP.matches && UI.dock === 'min') setDock('open'); });
@@ -1605,11 +1616,166 @@ function renderWelcome() {
 }
 
 /* ---------- Routing ---------- */
+/* ---------- Practice: 500 problems from easy to hard ----------
+   The problems live in assets/js/kicau/practice/ and load the first time Practice opens, so the chat and the opening
+   never wait for them. Each problem is judged like a request: on the sheet you see and on a hidden one. */
+let practiceP = null;
+function loadPractice() {
+  if (window.KicauPractice && window.KicauPractice.__ready) return Promise.resolve(window.KicauPractice);
+  if (practiceP) return practiceP;
+  const base = new URL('assets/js/kicau/practice/', document.baseURI).href;
+  const add = (f) => new Promise((res, rej) => { const s = document.createElement('script'); s.src = base + f; s.onload = res; s.onerror = () => rej(new Error('Could not load ' + f)); document.head.appendChild(s); });
+  practiceP = add('core.js')
+    /* One topic file failing to load never takes the rest of Practice down. */
+    .then(() => Promise.all(window.KicauPractice.FILES.map((f) => add(f.file).catch((e) => console.warn(e.message)))))
+    .then(() => add('index.js').catch(() => null))
+    .then(() => { window.KicauPractice.__ready = true; return window.KicauPractice; })
+    .catch((e) => { practiceP = null; throw e; });
+  return practiceP;
+}
+const DIFF = { Easy: 'e', Medium: 'm', Hard: 'h' };
+function practiceStats(L) {
+  const pr = PR(), by = { Easy: [0, 0], Medium: [0, 0], Hard: [0, 0] };
+  for (const x of L) { by[x.difficulty][1]++; if (pr.solved[x.id]) by[x.difficulty][0]++; }
+  return { by, solved: Object.keys(pr.solved).length, total: L.length };
+}
+function renderPractice() {
+  UI.person = null; UI.prac = null;
+  app.innerHTML = shell('practice', `<div class="page practice" id="practice"><h1>Practice</h1><p class="lead">Loading the problems…</p></div>`);
+  wireSide();
+  loadPractice().then(drawPractice).catch(() => { const el = $('#practice'); if (el) el.innerHTML = '<h1>Practice</h1><p class="lead">The problems did not load. Check your connection and open Practice again.</p>'; });
+}
+function drawPractice(P) {
+  const el = $('#practice');
+  if (!el) return;
+  const L = P.list(), st = practiceStats(L), pr = PR();
+  const f = UI.pf = UI.pf || { d: 'All', s: 'All', t: '', q: '' };
+  const topics = [...new Set(L.flatMap((x) => x.topics))].sort();
+  const bar = (d) => { const [a, b] = st.by[d]; return `<div class="pbar ${DIFF[d]}"><span><b>${d}</b> ${a}<em>/${b}</em></span><i><s style="width:${b ? (a / b) * 100 : 0}%"></s></i></div>`; };
+  const seg = (k, vals) => `<div class="seg" role="group">${vals.map((v) => `<button type="button" data-f="${k}" data-v="${v}" aria-pressed="${f[k] === v}">${v}</button>`).join('')}</div>`;
+  el.innerHTML = `<div class="pr-hd"><div><h1>Practice</h1><p class="lead">${L.length} Excel problems, from easy to hard. Each one is checked on the sheet you see and on a hidden test, the same file a day later.</p></div>
+    <div class="pr-stats">${ring(st.solved, st.total, 'pr-ring')}<div class="pbars">${bar('Easy')}${bar('Medium')}${bar('Hard')}</div></div></div>
+    <div class="pr-tools"><input class="search" id="pq" type="search" placeholder="Search problems" value="${esc(f.q)}" aria-label="Search problems">
+      ${seg('d', ['All', 'Easy', 'Medium', 'Hard'])}${seg('s', ['All', 'Todo', 'Solved'])}
+      <select id="pt" aria-label="Topic"><option value="">All topics</option>${topics.map((t) => `<option${f.t === t ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select>
+      <button type="button" class="btn sm" id="ppick">${I('spark')}Pick one</button></div>
+    <div class="pr-list" id="plist" role="list"></div>`;
+  const draw = () => {
+    const q = f.q.trim().toLowerCase();
+    const rows = L.filter((x) => (f.d === 'All' || x.difficulty === f.d) && (f.s === 'All' || (f.s === 'Solved') === !!pr.solved[x.id]) && (!f.t || x.topics.includes(f.t)) && (!q || String(x.n) === q || (x.title || '').toLowerCase().includes(q) || x.topics.some((t) => t.toLowerCase().includes(q))));
+    $('#plist').innerHTML = rows.length ? rows.map((x) => `<a class="pr-row${pr.solved[x.id] ? ' done' : pr.tried[x.id] ? ' tried' : ''}" href="#p-${x.n}" role="listitem"><span class="pst" aria-label="${pr.solved[x.id] ? 'Solved' : pr.tried[x.id] ? 'Attempted' : 'Not started'}">${pr.solved[x.id] ? I('check') : pr.tried[x.id] ? '•' : ''}</span><span class="pn">${x.n}.</span><span class="pt">${esc(x.title || 'Problem ' + x.n)}</span><span class="ptags">${x.topics.slice(0, 2).map((t) => `<i>${esc(t)}</i>`).join('')}</span><span class="pd ${DIFF[x.difficulty]}">${x.difficulty}</span></a>`).join('') : '<div class="empty">No problem matches. Clear a filter.</div>';
+  };
+  draw();
+  el.querySelectorAll('[data-f]').forEach((b) => { b.onclick = () => { f[b.dataset.f] = b.dataset.v; el.querySelectorAll(`[data-f="${b.dataset.f}"]`).forEach((x) => x.setAttribute('aria-pressed', String(x === b))); draw(); }; });
+  $('#pq').oninput = (e) => { f.q = e.target.value; draw(); };
+  $('#pt').onchange = (e) => { f.t = e.target.value; draw(); };
+  $('#ppick').onclick = () => { const todo = L.filter((x) => !pr.solved[x.id] && (f.d === 'All' || x.difficulty === f.d)); const pick = todo.length ? todo[Math.floor(Math.random() * todo.length)] : L[0]; location.hash = '#p-' + pick.n; };
+}
+function renderProblem(n) {
+  UI.person = null;
+  app.innerHTML = shell('practice', `<div class="page practice" id="practice"><p class="lead">Loading problem ${n}…</p></div>`);
+  wireSide();
+  loadPractice().then((P) => {
+    const meta = P.list()[n - 1];
+    if (!meta) { location.hash = '#practice'; return; }
+    drawProblem(P.get(meta.id), P);
+  }).catch(() => { const el = $('#practice'); if (el) el.innerHTML = '<p class="lead">The problem did not load. Check your connection and try again.</p>'; });
+}
+function practiceDockHTML(m) {
+  const chipBtns = `${m.fnKey ? `<button class="chip fn" data-key="${esc(m.fnKey)}">${esc(m.fnKey)}</button>` : ''}${(m.chips || []).map((ch) => `<button class="chip" data-key="${esc(ch)}">${esc(ch)}</button>`).join('')}`;
+  const keys = coarse ? `<div class="keys" id="keys">${chipBtns}<span class="sep"></span>${['=', ',', '(', ')', ':', '$', '"', '>', '<', '>=', '*', '/', '+', '-', '&'].map((k) => `<button type="button" data-key="${esc(k)}">${esc(k)}</button>`).join('')}<button type="button" class="wd" data-act="back" aria-label="Delete one character">⌫</button><button type="button" class="wd" data-act="clear">Clear</button><button type="button" class="wd" data-act="abc" aria-label="Show the phone keyboard">ABC</button></div>` : '';
+  const where = m.spill ? `Type one formula in <b>${esc(m.answerCell)}</b>. It spills by itself.` : m.fill ? `Type it in <b>${esc(m.answerCell)}</b>. Submit fills it down to <b>${esc(m.fill.col + m.fill.last)}</b>.` : `Answer cell <b>${esc(m.answerCell)}</b>`;
+  return `<section class="dock ${LAP.matches ? 'open' : UI.dock === 'min' ? 'open' : UI.dock}" id="dock" aria-label="Workbook">
+    <button class="grab" id="grab" aria-label="Make the workbook bigger or smaller"></button>
+    <div class="shd"><span class="xl">X</span><span class="nm">${esc(m.file)}</span><small>· problem ${m.n}</small>${LAP.matches ? maxButton() : `<button class="icb" id="dockbig" aria-label="Full screen sheet">${I(UI.dock === 'full' ? 'collapse' : 'expand')}</button>`}</div>
+    <div class="fbar"><span class="nbox" title="Name box: the cell your answer goes in">${esc(m.answerCell)}</span><span class="fxi" aria-hidden="true">fx</span><div class="fxbox"><div class="paint" id="paint" aria-hidden="true"></div><input id="fx" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Formula for ${esc(m.answerCell)}" ${coarse ? 'inputmode="none"' : ''}></div></div>
+    <div class="fxlabel">${where}</div>
+    <div class="gw" id="gw">${gridHTML(m)}</div>
+    ${SHEET_TABS}
+    ${coarse ? '' : `<div class="chips" id="chips"><small>Tap a cell, or</small>${chipBtns}</div>`}
+    ${keys}
+    <div class="engmsg" id="engmsg" ${ENG.api ? 'hidden' : ''}>${ENG.failed ? 'The practice sheet did not load. Reload to try again.' : 'Warming up the practice sheet…'}</div>
+    <div class="comp"><button class="btn sm ghost" id="preset" type="button">${I('undo')}Reset</button><span class="sp"></span><button class="send" id="send" aria-label="Submit">${I('check')}<span>Submit</span></button></div></section>`;
+}
+function drawProblem(m, P) {
+  UI.prac = m;
+  const L = P.list(), pr = PR(), solved = pr.solved[m.id];
+  const prev = L[m.n - 2], next = L[m.n];
+  const desc = `<section class="chatcol pdesc" aria-label="Problem ${m.n}">
+    <div class="pdesc-in">
+      <a class="pback" href="#practice">${I('back')}All problems</a>
+      <h1>${m.n}. ${esc(m.title)}</h1>
+      <div class="pmeta"><span class="pd ${DIFF[m.difficulty]}">${m.difficulty}</span>${m.topics.map((t) => `<i class="ptag">${esc(t)}</i>`).join('')}${solved ? `<span class="pdone">${I('check')}Solved</span>` : ''}</div>
+      <div class="pst-body">${m.statement}</div>
+      <p class="phid">${I('lock')}Checked on this sheet and on a hidden test: the same file a day later, with some numbers changed.</p>
+      <div class="pres" id="pres" role="status" aria-live="polite"></div>
+      <div class="phints">${(m.hints || []).map((h, i) => `<details><summary>Hint ${i + 1}</summary><p>${esc(h)}</p></details>`).join('')}</div>
+      <div class="psol" id="psol">${solved ? solutionHTML(m) : `<details class="locked"><summary>Solution</summary><p>Unlocks when you solve it, or <button type="button" class="linkish" id="pshow">show it now</button>.</p></details>`}</div>
+      <nav class="pnav">${prev ? `<a class="btn sm ghost" href="#p-${prev.n}">${I('back')}${prev.n}</a>` : '<span></span>'}<button type="button" class="btn sm ghost" id="ppick2">${I('spark')}Pick one</button>${next ? `<a class="btn sm" href="#p-${next.n}">Next: ${next.n}</a>` : '<span></span>'}</nav>
+    </div></section>`;
+  app.innerHTML = shell('prob', `<div class="chatwrap prob">${desc}${practiceDockHTML(m)}</div>`);
+  wireSide();
+  wireDock(m);
+  if (!LAP.matches) setDock(UI.dock === 'min' ? 'open' : UI.dock);
+  wireMax();
+  const ps = $('#pshow');
+  if (ps) ps.onclick = () => { $('#psol').innerHTML = solutionHTML(m); };
+  $('#preset').onclick = () => { const st = MST(m.id); st.draft = ''; st.shownVals = null; st.shown = undefined; st.shownOk = false; save(); setFormula(m.starter || '='); const gw = $('#gw'); if (gw) gw.innerHTML = gridHTML(m); $('#pres').innerHTML = ''; };
+  $('#ppick2').onclick = () => { const todo = L.filter((x) => !pr.solved[x.id] && x.id !== m.id); const pick = todo.length ? todo[Math.floor(Math.random() * todo.length)] : L[0]; location.hash = '#p-' + pick.n; };
+  if (solved && !MST(m.id).draft) setFormula(solved.formula);
+}
+function solutionHTML(m) {
+  return `<h2>Solution</h2><p>${esc(m.explain || '')}</p><pre class="code"><code>${esc(m.solution)}</code></pre>${(m.alts || []).length ? `<p class="palts">Also accepted:</p><ul class="palts">${m.alts.map((a) => `<li><code>${esc(a)}</code></li>`).join('')}</ul>` : ''}`;
+}
+/** Submit: judge on both sheets, show the verdict, and draw your results on the sheet. Nothing moves on by itself. */
+function submitPractice(m) {
+  const box = $('#pres');
+  if (!ENG.api) { const e = $('#engmsg'); if (e) { e.hidden = false; e.textContent = ENG.failed ? 'The practice sheet did not load. Reload to try again.' : 'Warming up the practice sheet. Submit again in a moment.'; } return; }
+  const typed = $('#fx').value;
+  const v = Check.judge(m, typed, run(m));
+  window.__lastVerdict = v;
+  const pr = PR(), st = MST(m.id);
+  if (v.state === 'empty') { box.innerHTML = `<div class="verdict err"><b>Nothing to submit</b><p>${esc(v.plain)}</p></div>`; return; }
+  if (v.state === 'error') { box.innerHTML = `<div class="verdict err"><b>${esc(v.title)}</b><p>${esc(v.plain)}</p>${v.fix ? `<p>Try <code>${esc(v.fix.formula)}</code></p>` : ''}</div>`; return; }
+  pr.tried[m.id] = (pr.tried[m.id] || 0) + 1;
+  const formula = Check.normalize(typed);
+  let colVals = null, shown = v.value !== undefined ? v.value : v.typed;
+  if ((m.fill || m.spill) && formula[0] === '=') colVals = fillValues(m, formula, 'base');
+  st.shown = shown; st.shownVals = colVals; st.shownOk = v.state === 'pass'; st.draft = typed;
+  fillRefs(m).forEach((ref, i) => { const td = $(`#gw td[data-ref="${ref}"]`); if (!td) return; td.textContent = colVals ? fmtAns(m, colVals[i]) : fmtAns(m, shown); td.className = v.state === 'pass' ? 'got' : 'miss'; });
+  if (v.state === 'pass') {
+    const first = !pr.solved[m.id];
+    pr.solved[m.id] = { at: Date.now(), formula };
+    save();
+    box.innerHTML = `<div class="verdict ok"><b>${I('check')}Accepted</b><p>Right on this sheet and on the hidden test.${first ? ` ${Object.keys(pr.solved).length} of 500 solved.` : ''}</p></div>`;
+    $('#psol').innerHTML = solutionHTML(m);
+    const md = document.querySelector('.pmeta');
+    if (md && !md.querySelector('.pdone')) md.insertAdjacentHTML('beforeend', `<span class="pdone">${I('check')}Solved</span>`);
+    say('Accepted');
+    return;
+  }
+  save();
+  let detail = esc(v.plain || '');
+  if (v.code === 'frozen') detail = 'Right on this sheet, wrong on the hidden test (the same file a day later). Point at cells and ranges instead of typing numbers or names.';
+  else if (v.code !== 'typed' && v.target !== undefined) {
+    if (colVals) {
+      const want = fillValues(m, m.solution, 'base');
+      const i = want.findIndex((w, k) => !Check.same(colVals[k], w, m.precision, m.exactCase));
+      if (i >= 0) detail = m.spill ? `Your result differs from the expected one at item ${i + 1}: you have ${esc(fmtAns(m, colVals[i]))}, expected ${esc(fmtAns(m, want[i]))}.` : `Row ${m.fill.first + i}: you have ${esc(fmtAns(m, colVals[i]))}, expected ${esc(fmtAns(m, want[i]))}.`;
+    } else detail = `Your result is ${esc(fmtAns(m, v.value))}. Expected ${esc(fmtAns(m, v.target))}.`;
+  }
+  box.innerHTML = `<div class="verdict bad"><b>${v.code === 'typed' ? 'Typed value' : v.code === 'frozen' ? 'Wrong answer on the hidden test' : 'Wrong answer'}</b><p>${detail}</p></div>`;
+  say(v.code === 'frozen' ? 'Wrong answer on the hidden test' : 'Wrong answer');
+}
+
 function render() {
   if (!ST.name || !ST.mood) { renderWelcome(); return; }
+  UI.prac = null;
   /* Older #/chat/tika style links still work. */
   const h = location.hash.replace(/^#\/?/, '').replace(/^chat\//, 'chat-');
   if (h.startsWith('chat-')) renderChat(h.slice(5));
+  else if (h === 'practice') renderPractice();
+  else if (/^p-\d+$/.test(h)) renderProblem(+h.slice(2));
   else if (h === 'notes') renderNotes();
   else if (h === 'career') renderCareer();
   else if (h === 'you' || h === 'me') renderMe();
@@ -1634,9 +1800,15 @@ if (window.visualViewport) {
   try { seen = sessionStorage.getItem('kicau.intro') === '1'; } catch (e) { /* storage blocked: play it */ }
   if (seen && !Q.has('intro')) return;
   try { sessionStorage.setItem('kicau.intro', '1'); } catch (e) { /* storage blocked */ }
-  try { window.kcIntro(() => { const n = $('#wname'); if (n && !coarse) n.focus({ preventScroll: true }); }); } catch (e) { /* the app works without it */ }
+  try {
+    window.kcIntro(() => { engineGo(); const n = $('#wname'); if (n && !coarse) n.focus({ preventScroll: true }); });
+    UI.introPlaying = true;
+    /* The overlay now covers the screen; the page underneath can show, so the curtain reveals the welcome screen. */
+    requestAnimationFrame(() => document.documentElement.classList.remove('kc-pre'));
+  } catch (e) { /* the app works without it */ }
 })();
+if (!UI.introPlaying) { engineGo(); document.documentElement.classList.remove('kc-pre'); } else setTimeout(engineGo, 7000); /* a paused background tab still gets its engine */
 render();
 
 /* For the browser tests. */
-window.__kicau = { setLine: (l) => { MST(current().id).line = l; }, sendVba: () => sendVba(current()), runQuery, setSteps: (steps) => { cfgOf(current()).steps = JSON.parse(JSON.stringify(steps)); }, setCfg: (cfg) => { const m = current(); Object.assign(cfgOf(m), cfg); }, sendBuild: () => sendBuild(current()), pivot, get ST() { return ST; }, LIST, MS, send, setFormula, coffee, pick, current, engine: enginePromise, run: (m) => run(m), Check, fillValues, uploadBuffer: (buf, name) => checkUpload(current(), buf, name || 'koleksi_oktober.xlsx'), buildXlsx: (m) => buildXlsx(m || current()), buildBooks: (m) => buildBooks(m || current()), cont, refsIn, get UI() { return UI; } };
+window.__kicau = { setLine: (l) => { MST(current().id).line = l; }, sendVba: () => sendVba(current()), runQuery, setSteps: (steps) => { cfgOf(current()).steps = JSON.parse(JSON.stringify(steps)); }, setCfg: (cfg) => { const m = current(); Object.assign(cfgOf(m), cfg); }, sendBuild: () => sendBuild(current()), pivot, get ST() { return ST; }, LIST, MS, send, setFormula, coffee, pick, current, engine: enginePromise, run: (m) => run(m), Check, fillValues, uploadBuffer: (buf, name) => checkUpload(current(), buf, name || 'koleksi_oktober.xlsx'), buildXlsx: (m) => buildXlsx(m || current()), buildBooks: (m) => buildBooks(m || current()), cont, refsIn, get UI() { return UI; }, loadPractice, submitPractice, PR };
