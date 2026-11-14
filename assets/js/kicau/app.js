@@ -236,6 +236,7 @@ function renderChat(p) {
   if (held) wireReview(held);
   wireMax();
   mountMini(p);
+  fitGrids();
 }
 /** The line under a file card: how many rows, and the other workbooks it comes with. */
 function fileNote(m) {
@@ -404,7 +405,7 @@ function entryHTML(e, i, log) {
     case 'lesson': {
       const L = m.lesson;
       const ex = L.ex ? `<ol>${L.ex.map(([c, n]) => `<li><code>${esc(c)}</code><span>${esc(n)}</span></li>`).join('')}</ol><p class="exres" data-exres="${m.id}">Working out its result…</p>` : '';
-      return `<div class="mentor lesson">${avatar('sari', 34)}<div class="body"><small>Mbak Sari · ${isClosed(m) ? 'what you used' : 'before you start'}</small><p class="idea">${esc(L.idea)}</p>${L.teach}<details${e.open && !isClosed(m) ? ' open' : ''} class="more"><summary>${L.ex ? 'Example, line by line' : 'Where you have seen this'}</summary>${ex}${L.bridge ? `<p class="bridge"><b>From your ledger days:</b> ${esc(L.bridge)}</p>` : ''}</details></div></div>`;
+      return `<div class="mentor lesson">${avatar('sari', 34)}<div class="body"><small>Mbak Sari · ${isClosed(m) ? 'what you used' : 'before you start'}</small><p class="idea">${esc(L.idea)}</p>${L.teach}<details${e.open && !isClosed(m) ? ' open' : ''} class="more"><summary>${L.ex ? 'The example, line by line' : 'Where you have seen this'}</summary>${ex}${L.bridge ? `<p class="bridge"><b>From your ledger days:</b> ${esc(L.bridge)}</p>` : ''}</details></div></div>`;
     }
     case 'answer': {
       let rows = '';
@@ -511,6 +512,37 @@ function gridHTML(m, solved) {
   }
   return `<table class="gx${m.cols ? ' wide' : ''}" aria-label="${esc(m.file)}"><thead>${head}</thead><tbody>${body}</tbody></table>`;
 }
+/* ---------- The sheet fills its window, as in Excel ----------
+   After the data, empty columns (J, K, L...) and empty rows run to the edges of the panel. They are added after the
+   grid is drawn and again whenever the panel changes size (maximize, full screen, a resized window). */
+const colName = (i) => { let n = i + 1, out = ''; while (n > 0) { const r = (n - 1) % 26; out = String.fromCharCode(65 + r) + out; n = Math.floor((n - 1) / 26); } return out; };
+const colIndex = (c) => c.split('').reduce((a, ch) => a * 26 + ch.charCodeAt(0) - 64, 0) - 1;
+function padGrid(gw) {
+  const t = gw && gw.querySelector('table.gx');
+  if (!t || !t.tHead || !t.tBodies[0]) return;
+  t.querySelectorAll('.pad').forEach((x) => x.remove());
+  const head = t.tHead.rows[0], body = t.tBodies[0];
+  if (!body.rows.length || !gw.clientWidth) return;
+  const lastTh = head.cells[head.cells.length - 1];
+  const lastLetter = (lastTh.querySelector('[data-col]') || {}).dataset ? lastTh.querySelector('[data-col]').dataset.col : lastTh.textContent.trim();
+  const COLW = 76, rowH = body.rows[body.rows.length - 1].offsetHeight || 28;
+  const extraC = Math.min(30, Math.max(0, Math.ceil((gw.clientWidth - t.offsetWidth) / COLW)));
+  const extraR = Math.min(80, Math.max(0, Math.ceil((gw.clientHeight - t.offsetHeight) / rowH) + 1));
+  if (!extraC && !extraR) return;
+  const start = colIndex(lastLetter) + 1;
+  const letters = Array.from({ length: extraC }, (_, k) => colName(start + k));
+  head.insertAdjacentHTML('beforeend', letters.map((L) => `<th class="pad" scope="col" style="min-width:${COLW}px">${L}</th>`).join(''));
+  const dataCols = [...head.cells].slice(1).filter((c) => !c.classList.contains('pad')).map((c) => (c.querySelector('[data-col]') ? c.querySelector('[data-col]').dataset.col : c.textContent.trim()));
+  [...body.rows].forEach((tr) => { const r = tr.cells[0].textContent.trim(); tr.insertAdjacentHTML('beforeend', letters.map((L) => `<td class="pad" data-ref="${L}${r}"></td>`).join('')); });
+  const lastRow = +body.rows[body.rows.length - 1].cells[0].textContent.trim() || body.rows.length;
+  let rows = '';
+  for (let k = 1; k <= extraR; k++) { const r = lastRow + k; rows += `<tr class="pad"><th scope="row">${r}</th>${dataCols.concat(letters).map((L) => `<td data-ref="${L}${r}"></td>`).join('')}</tr>`; }
+  body.insertAdjacentHTML('beforeend', rows);
+}
+const gridRO = typeof ResizeObserver === 'function' ? new ResizeObserver((entries) => { for (const e of entries) padGrid(e.target); }) : null;
+/** Pad every sheet on screen now, and again when its panel resizes. */
+function fitGrids() { document.querySelectorAll('.gw').forEach((gw) => { padGrid(gw); if (gridRO && !gw.__ro) { gw.__ro = 1; gridRO.observe(gw); } }); }
+
 /* ---------- Several workbooks ----------
    A request can have more than one workbook open (m.books, Chapter 11). Each book has sheets; the request's own
    sheet is the first sheet of the first book. The learner switches with the workbook tabs in the title bar and
@@ -569,7 +601,7 @@ function wireTabs(m, solved) {
     const v = viewOf(m);
     if (bk) { v.b = +bk.dataset.book; v.s = 0; } else v.s = +sh.dataset.sheet;
     const gw = $('#gw');
-    if (gw) { gw.innerHTML = sheetGrid(m, solved); gw.scrollTop = 0; gw.scrollLeft = 0; }
+    if (gw) { gw.innerHTML = sheetGrid(m, solved); gw.scrollTop = 0; gw.scrollLeft = 0; padGrid(gw); }
     const t1 = $('#bktabs'), t2 = $('#sheettabs');
     if (t1) t1.outerHTML = bookTabsHTML(m, '');
     if (t2) t2.outerHTML = sheetTabsHTML(m);
@@ -1687,11 +1719,11 @@ function practiceDockHTML(m) {
   const where = m.spill ? `Type one formula in <b>${esc(m.answerCell)}</b>. It spills by itself.` : m.fill ? `Type it in <b>${esc(m.answerCell)}</b>. Submit fills it down to <b>${esc(m.fill.col + m.fill.last)}</b>.` : `Answer cell <b>${esc(m.answerCell)}</b>`;
   return `<section class="dock ${LAP.matches ? 'open' : UI.dock === 'min' ? 'open' : UI.dock}" id="dock" aria-label="Workbook">
     <button class="grab" id="grab" aria-label="Make the workbook bigger or smaller"></button>
-    <div class="shd"><span class="xl">X</span><span class="nm">${esc(m.file)}</span><small>· problem ${m.n}</small>${LAP.matches ? maxButton() : `<button class="icb" id="dockbig" aria-label="Full screen sheet">${I(UI.dock === 'full' ? 'collapse' : 'expand')}</button>`}</div>
+    <div class="shd">${bookTabsHTML(m, '· problem ' + m.n)}${LAP.matches ? maxButton() : `<button class="icb" id="dockbig" aria-label="Full screen sheet">${I(UI.dock === 'full' ? 'collapse' : 'expand')}</button>`}</div>
     <div class="fbar"><span class="nbox" title="Name box: the cell your answer goes in">${esc(m.answerCell)}</span><span class="fxi" aria-hidden="true">fx</span><div class="fxbox"><div class="paint" id="paint" aria-hidden="true"></div><input id="fx" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Formula for ${esc(m.answerCell)}" ${coarse ? 'inputmode="none"' : ''}></div></div>
     <div class="fxlabel">${where}</div>
-    <div class="gw" id="gw">${gridHTML(m)}</div>
-    ${SHEET_TABS}
+    <div class="gw" id="gw">${sheetGrid(m)}</div>
+    ${sheetTabsHTML(m)}
     ${coarse ? '' : `<div class="chips" id="chips"><small>Tap a cell, or</small>${chipBtns}</div>`}
     ${keys}
     <div class="engmsg" id="engmsg" ${ENG.api ? 'hidden' : ''}>${ENG.failed ? 'The practice sheet did not load. Reload to try again.' : 'Warming up the practice sheet…'}</div>
@@ -1720,9 +1752,10 @@ function drawProblem(m, P) {
   wireMax();
   const ps = $('#pshow');
   if (ps) ps.onclick = () => { $('#psol').innerHTML = solutionHTML(m); };
-  $('#preset').onclick = () => { const st = MST(m.id); st.draft = ''; st.shownVals = null; st.shown = undefined; st.shownOk = false; save(); setFormula(m.starter || '='); const gw = $('#gw'); if (gw) gw.innerHTML = gridHTML(m); $('#pres').innerHTML = ''; };
+  $('#preset').onclick = () => { const st = MST(m.id); st.draft = ''; st.shownVals = null; st.shown = undefined; st.shownOk = false; save(); setFormula(m.starter || '='); const gw = $('#gw'); if (gw) { gw.innerHTML = sheetGrid(m); padGrid(gw); } $('#pres').innerHTML = ''; };
   $('#ppick2').onclick = () => { const todo = L.filter((x) => !pr.solved[x.id] && x.id !== m.id); const pick = todo.length ? todo[Math.floor(Math.random() * todo.length)] : L[0]; location.hash = '#p-' + pick.n; };
   if (solved && !MST(m.id).draft) setFormula(solved.formula);
+  fitGrids();
 }
 function solutionHTML(m) {
   return `<h2>Solution</h2><p>${esc(m.explain || '')}</p><pre class="code"><code>${esc(m.solution)}</code></pre>${(m.alts || []).length ? `<p class="palts">Also accepted:</p><ul class="palts">${m.alts.map((a) => `<li><code>${esc(a)}</code></li>`).join('')}</ul>` : ''}`;

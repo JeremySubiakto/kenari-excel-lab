@@ -784,3 +784,25 @@ code,.code,.chip,.keys button,.fxbox input,.fxbox .paint,table.gx,.code-v,.ans,t
   .chatwrap.prob .pdesc-in{padding-bottom:30px}
   .tabs a{font-size:11px}
 }
+
+/* ===================== Cards that read well ===================== */
+/* Every fold-out shows that it opens: a chevron that turns, on a light pill. */
+details>summary{list-style:none}
+details>summary::-webkit-details-marker{display:none}
+.lesson details summary,.phints summary,.psol summary{gap:8px}
+.lesson details summary::after,.phints summary::after,.psol summary::after{content:"";flex:none;width:7px;height:7px;margin:0 4px 3px auto;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg);transition:transform .2s}
+.lesson details[open]>summary::after,.phints details[open]>summary::after,.psol details[open]>summary::after{transform:rotate(-135deg);margin-bottom:-3px}
+.lesson details.more{margin-top:10px;border-radius:12px;background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--line);padding:0 12px}
+.lesson details.more[open]{padding-bottom:10px}
+.lesson details summary{min-height:40px}
+/* Long formulas wrap inside a card instead of running past its edge. */
+.mentor .body,.b,.verdict,.pst-body{overflow-wrap:anywhere}
+.mentor code,.b code{white-space:normal}
+/* The coffee badge hides when today's three are used: Sari still helps, the cup only looks sleepier. */
+.coffee.out i{display:none}
+.coffee.out{opacity:.72}
+html{background:var(--bg)}
+/* The empty columns and rows past the data: plain Excel cells, no data, still tappable. */
+.gx th.pad{font:400 13px var(--xl-font);color:var(--xs-hd-ink);text-align:center;border-bottom:1px solid var(--xs-hd-line);border-right:1px solid var(--xs-hd-line)}
+.gx td.pad,.gx tr.pad td{cursor:default}
+.gx tr.pad th{color:var(--xs-hd-ink)}

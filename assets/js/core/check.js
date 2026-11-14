@@ -13,7 +13,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 
-  const KNOWN = ['SUM', 'SUMIF', 'SUMIFS', 'COUNT', 'COUNTA', 'COUNTIF', 'COUNTIFS', 'AVERAGE', 'AVERAGEIF', 'AVERAGEIFS', 'MIN', 'MAX', 'MINIFS', 'MAXIFS', 'IF', 'IFS', 'IFERROR', 'IFNA', 'AND', 'OR', 'NOT', 'VLOOKUP', 'HLOOKUP', 'XLOOKUP', 'INDEX', 'MATCH', 'XMATCH', 'FILTER', 'UNIQUE', 'SORT', 'SORTBY', 'LET', 'SEQUENCE', 'TEXT', 'LEFT', 'RIGHT', 'MID', 'LEN', 'TRIM', 'PROPER', 'UPPER', 'LOWER', 'SUBSTITUTE', 'TEXTJOIN', 'CONCAT', 'DATE', 'EOMONTH', 'EDATE', 'TODAY', 'ROUND', 'ROUNDUP', 'ROUNDDOWN', 'SUMPRODUCT', 'SWITCH', 'CHOOSE', 'OFFSET', 'INDIRECT'];
+  const KNOWN = ['ABS', 'ACCRINT', 'ADDRESS', 'AGGREGATE', 'AND', 'ARRAYTOTEXT', 'AVERAGE', 'AVERAGEA', 'AVERAGEIF', 'AVERAGEIFS', 'BYCOL', 'BYROW', 'CEILING', 'CEILING.MATH', 'CHAR', 'CHOOSE', 'CHOOSECOLS', 'CHOOSEROWS', 'CLEAN', 'CODE', 'COLUMN', 'COLUMNS', 'CONCAT', 'CONCATENATE', 'CORREL', 'COUNT', 'COUNTA', 'COUNTBLANK', 'COUNTIF', 'COUNTIFS', 'COUPDAYS', 'CUMIPMT', 'CUMPRINC', 'DATE', 'DATEDIF', 'DATEVALUE', 'DAY', 'DAYS', 'DAYS360', 'DB', 'DDB', 'DOLLAR', 'DROP', 'EDATE', 'EFFECT', 'EOMONTH', 'EVEN', 'EXACT', 'EXP', 'EXPAND', 'FALSE', 'FILTER', 'FIND', 'FIXED', 'FLOOR', 'FLOOR.MATH', 'FORECAST', 'FORECAST.LINEAR', 'FREQUENCY', 'FV', 'FVSCHEDULE', 'GEOMEAN', 'HLOOKUP', 'HOUR', 'HSTACK', 'HYPERLINK', 'IF', 'IFERROR', 'IFNA', 'IFS', 'INDEX', 'INDIRECT', 'INT', 'INTERCEPT', 'IPMT', 'IRR', 'ISBLANK', 'ISERR', 'ISERROR', 'ISEVEN', 'ISFORMULA', 'ISLOGICAL', 'ISNA', 'ISNONTEXT', 'ISNUMBER', 'ISODD', 'ISOWEEKNUM', 'ISPMT', 'ISTEXT', 'LAMBDA', 'LARGE', 'LEFT', 'LEN', 'LET', 'LINEST', 'LN', 'LOG', 'LOG10', 'LOOKUP', 'LOWER', 'MAKEARRAY', 'MAP', 'MATCH', 'MAX', 'MAXA', 'MAXIFS', 'MEDIAN', 'MID', 'MIN', 'MINA', 'MINIFS', 'MINUTE', 'MIRR', 'MOD', 'MODE', 'MONTH', 'MROUND', 'N', 'NA', 'NETWORKDAYS', 'NETWORKDAYS.INTL', 'NOMINAL', 'NOT', 'NOW', 'NPER', 'NPV', 'NUMBERVALUE', 'ODD', 'OFFSET', 'OR', 'PERCENTILE', 'PERCENTRANK', 'PI', 'PMT', 'POWER', 'PPMT', 'PRODUCT', 'PROPER', 'PV', 'QUARTILE', 'QUOTIENT', 'RAND', 'RANDBETWEEN', 'RANK', 'RANK.AVG', 'RANK.EQ', 'RATE', 'REDUCE', 'REPLACE', 'REPT', 'RIGHT', 'ROUND', 'ROUNDDOWN', 'ROUNDUP', 'ROW', 'ROWS', 'RRI', 'SCAN', 'SEARCH', 'SECOND', 'SEQUENCE', 'SIGN', 'SLN', 'SLOPE', 'SMALL', 'SORT', 'SORTBY', 'SQRT', 'STDEV', 'STDEV.P', 'STDEV.S', 'SUBSTITUTE', 'SUBTOTAL', 'SUM', 'SUMIF', 'SUMIFS', 'SUMPRODUCT', 'SUMSQ', 'SWITCH', 'SYD', 'T', 'TAKE', 'TEXT', 'TEXTAFTER', 'TEXTBEFORE', 'TEXTJOIN', 'TEXTSPLIT', 'TIME', 'TIMEVALUE', 'TOCOL', 'TODAY', 'TOROW', 'TRANSPOSE', 'TREND', 'TRIM', 'TRUE', 'TRUNC', 'TYPE', 'UNIQUE', 'UPPER', 'VALUE', 'VAR', 'VAR.P', 'VAR.S', 'VLOOKUP', 'VSTACK', 'WEEKDAY', 'WEEKNUM', 'WORKDAY', 'WORKDAY.INTL', 'WRAPCOLS', 'WRAPROWS', 'XIRR', 'XLOOKUP', 'XMATCH', 'XNPV', 'XOR', 'YEAR', 'YEARFRAC'];
 
   /** Walk a formula, calling fn for each character outside double-quoted text. */
   function outsideStrings(f, fn) {
@@ -74,7 +74,7 @@
 
   const ERRORS = {
     '#NAME?': { title: 'Excel does not know that word', plain: 'One word in your formula is not a function or a cell Excel can find. Check the spelling, and put text inside double quotes.' },
-    '#VALUE!': { title: 'The two ranges do not line up', plain: 'A function got something it cannot work with. With SUMIFS, this usually means two ranges have different numbers of rows, so check that they start and end on the same rows.' },
+    '#VALUE!': { title: 'The ranges do not line up', plain: 'In SUMIFS, COUNTIFS or SUMPRODUCT every range must have the same number of rows. Check that each one starts and ends on the same rows.' },
     '#REF!': { title: 'A cell in this formula does not exist', plain: 'The formula points at a cell that is not there.' },
     '#DIV/0!': { title: 'This divides by zero', plain: 'The number under the division is 0 or empty.' },
     '#N/A': { title: 'Nothing matched', plain: 'A lookup searched for a value and did not find it.' },
@@ -98,6 +98,8 @@
       const re = new RegExp('\\b' + bad.name.replace(/[.]/g, '\\.') + '(?=\\s*\\()');
       return { title: 'Right idea, different spelling', plain: 'Excel does not have a function called ' + bad.name + '. It looks like you meant ' + bad.suggest + '.', fix: { label: 'Change ' + bad.name + ' to ' + bad.suggest, formula: formula.replace(re, bad.suggest) } };
     }
+    /* #VALUE! has two common causes: ranges of different sizes in SUMIFS-type functions, or text where a number is needed. */
+    if (value === '#VALUE!' && !/\b(SUMIFS|COUNTIFS|AVERAGEIFS|MAXIFS|MINIFS|SUMPRODUCT)\s*\(/i.test(formula)) return { title: 'Something here is not a number', plain: 'Part of this formula got text, or a whole range, where it needed one number. Check the cells you pointed at: a header row, a word, or a range like E5:E21 inside a calculation that needs one cell.' };
     return ERRORS[value] || { title: 'Excel returned ' + value, plain: 'This formula gave an error value.' };
   }
 

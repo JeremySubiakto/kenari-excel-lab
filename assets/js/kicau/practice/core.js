@@ -143,6 +143,19 @@
     return MONTHS.map((m, i) => { base = Math.round(base * (1 + (r() - .42) * .12) / 1000000) * 1000000; return { month: m, i: i + 1, sales: base, returns: Math.round(base * r.pick([.01, .015, .02, .03]) / 100000) * 100000, cost: Math.round(base * r.pick([.58, .61, .64, .67]) / 1000000) * 1000000 }; });
   }
 
+  /* ---------- several workbooks ----------
+   Real reports pull from more than one file. A problem can open other sheets of its own workbook (sheets) and other
+   workbooks (books). Formulas name them as Excel does: Rates!$B$5 for a sheet of the same file,
+   [master_produk.xlsx]Produk!$A$5:$D$16 for another file. File names stay lowercase and sheet names have no letter
+   followed by digits (Q4, A1), so filling a formula down never changes them. */
+  const SHEETS = Symbol.for('kenari.sheets'), MAIN = Symbol.for('kenari.main');
+  const quoteName = (n) => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(n) ? n : "'" + n.replace(/'/g, "''") + "'");
+  /* A range helper for a sheet seen from the problem's own workbook: file null means the same workbook. */
+  function ext(file, name, S) {
+    const prefix = file ? (/[^A-Za-z0-9_.]/.test(file + name) ? "'[" + file + ']' + name + "'!" : '[' + file + ']' + name + '!') : quoteName(name) + '!';
+    return { prefix, file, name, S, A: (h) => prefix + S.A(h), T: (h1, h2) => prefix + S.T(h1, h2), R: (h) => prefix + S.R(h), cell: (h, i) => prefix + S.cell(h, i), abs: (h, i) => prefix + '$' + S.col(h) + '$' + (S.first + i) };
+  }
+
   /* ---------- the problem shape the app knows ---------- */
   const GENERIC = {
     typed: { title: 'That is a typed value', plain: 'A typed answer stays the same when the sheet changes. Start with = so Excel works it out.' },
@@ -163,6 +176,21 @@
     const base = Object.assign({}, o.base || S.cells), alt = Object.assign({}, o.alt || S.cells);
     if (o.ansLabel && fillCol) { base[fillCol + (S.first - 1)] = o.ansLabel; alt[fillCol + (S.first - 1)] = o.ansLabel; }
     const spill = o.spill ? { anchor: o.spillAnchor || S.next + S.first, cols: o.spill.cols, rows: o.spill.rows } : null;
+    /* Other sheets and workbooks: o.sheets = [{ name, sheet, base, alt }] in the same file, o.books = [{ file, sheets: [...] }]. */
+    let books;
+    if ((o.sheets && o.sheets.length) || (o.books && o.books.length)) {
+      const file = o.file || 'practice.xlsx', mainName = o.sheetName || 'Data';
+      const meta = (sh, f) => ({ name: sh.name, cols: sh.sheet.cols, num: sh.sheet.num, dateCols: sh.sheet.dateCols, first: sh.sheet.first, last: sh.sheet.last, prefix: f ? ext(f, sh.name, sh.sheet).prefix : quoteName(sh.name) + '!' });
+      const attach = (cells, v) => {
+        cells[MAIN] = mainName;
+        cells[SHEETS] = (o.sheets || []).map((sh) => ({ name: sh.name, cells: Object.assign({}, sh[v] || sh.sheet.cells) }))
+          .concat(...(o.books || []).map((b) => b.sheets.map((sh) => ({ name: b.file + '|' + sh.name, cells: Object.assign({}, sh[v] || sh.sheet.cells) }))));
+      };
+      attach(base, 'base'); attach(alt, 'alt');
+      books = [{ file, sheets: [{ name: mainName, cols, num: S.num, dateCols: S.dateCols, first: S.first, last: S.last, main: true, prefix: '' }].concat((o.sheets || []).map((sh) => meta(sh, null))) }]
+        .concat((o.books || []).map((b) => ({ file: b.file, sheets: b.sheets.map((sh) => meta(sh, b.file)) })));
+      o = Object.assign({}, o, { sheetName: mainName });
+    }
     if (spill && o.ansLabel) { const a = /^([A-Z])(\d+)$/.exec(spill.anchor); base[a[1] + (+a[2] - 1)] = o.ansLabel; alt[a[1] + (+a[2] - 1)] = o.ansLabel; }
     return Object.assign({
       kind: 'formula', practice: true, file: o.file || 'practice.xlsx', cols, num: S.num, dateCols: S.dateCols, first: S.first, last: S.last,
@@ -171,7 +199,7 @@
       colRange: Object.fromEntries(cols.map((c) => [c, c + S.first + ':' + c + S.last])),
       cells: base, variantCells: { base, alt }, variants: [{ id: 'alt', label: 'the hidden test' }],
       precision: 2, traps: [], requires: [], alts: [], hints: [], msgs: GENERIC, starter: '=', chips: []
-    }, o, { sheet: undefined, base: undefined, alt: undefined, msgs: GENERIC, fill: fillCol ? { col: fillCol, first: S.first, last: S.last } : null, spill });
+    }, o, { sheet: undefined, base: undefined, alt: undefined, sheets: undefined, msgs: GENERIC, fill: fillCol ? { col: fillCol, first: S.first, last: S.last } : null, spill, books });
   }
 
   /* ---------- the registry ---------- */
@@ -216,15 +244,15 @@
   const FILES = [
     { file: 't-basics.js', topic: 'Basics: arithmetic, SUM, AVERAGE, MIN, MAX, COUNT, ROUND, percentages, $ references', quota: { Easy: 80 } },
     { file: 't-logic.js', topic: 'Logic: IF, AND, OR, NOT, nested IF, IFS, SWITCH, IFERROR', quota: { Easy: 30, Medium: 40 } },
-    { file: 't-agg.js', topic: 'Conditional totals: SUMIF(S), COUNTIF(S), AVERAGEIF(S), MAXIFS, MINIFS, wildcards, date ranges', quota: { Easy: 20, Medium: 40, Hard: 10 } },
-    { file: 't-lookup.js', topic: 'Lookups: VLOOKUP, HLOOKUP, XLOOKUP, INDEX and MATCH, two-way, approximate tiers, IFERROR', quota: { Easy: 10, Medium: 40, Hard: 20 } },
+    { file: 't-agg.js', topic: 'Conditional totals: SUMIF(S), COUNTIF(S), AVERAGEIF(S), MAXIFS, MINIFS, wildcards, date ranges', quota: { Easy: 20, Medium: 40, Hard: 10 }, multi: 10 },
+    { file: 't-lookup.js', topic: 'Lookups: VLOOKUP, HLOOKUP, XLOOKUP, INDEX and MATCH, two-way, approximate tiers, IFERROR', quota: { Easy: 10, Medium: 40, Hard: 20 }, multi: 32 },
     { file: 't-text.js', topic: 'Text: LEFT, RIGHT, MID, FIND, SEARCH, LEN, TRIM, UPPER, PROPER, SUBSTITUTE, TEXT, TEXTJOIN, VALUE', quota: { Easy: 20, Medium: 25, Hard: 10 } },
     { file: 't-dates.js', topic: 'Dates: DATE, YEAR, MONTH, DAY, EOMONTH, EDATE, WEEKDAY, NETWORKDAYS, WORKDAY, aging', quota: { Medium: 30, Hard: 15 } },
     { file: 't-arrays.js', topic: 'Arrays: FILTER, SORT, SORTBY, UNIQUE, SEQUENCE, LET, SUMPRODUCT, XMATCH', quota: { Medium: 20, Hard: 30 } },
     { file: 't-finance.js', topic: 'Finance: PMT, IPMT, PPMT, FV, PV, NPER, RATE, NPV, IRR, SLN, DDB, growth, CAGR', quota: { Medium: 25, Hard: 15 } },
-    { file: 't-cases.js', topic: 'Real cases: several functions together, bank and FMCG', quota: { Hard: 20 } }
+    { file: 't-cases.js', topic: 'Real cases: several functions together, bank and FMCG', quota: { Hard: 20 }, multi: 20 }
   ];
 
-  const H = { rng, table, edit, sales, loans, invoices, stock, reps, monthly, problem, toSerial, iso, Q4, LETTERS, REGIONS, REPS, WAREHOUSES, CATEGORIES, MONTHS, PRODUCTS: D.PRODUCTS, db };
+  const H = { ext, SHEETS, MAIN, rng, table, edit, sales, loans, invoices, stock, reps, monthly, problem, toSerial, iso, Q4, LETTERS, REGIONS, REPS, WAREHOUSES, CATEGORIES, MONTHS, PRODUCTS: D.PRODUCTS, db };
   return { add, list, get, titles, setTitles, H, TEMPLATES, GENERIC, FILES };
 });

@@ -1,7 +1,8 @@
 /*
  * Practice, Conditional totals (20 Easy, 40 Medium, 10 Hard): SUMIF(S), COUNTIF(S), AVERAGEIF(S), MAXIFS, MINIFS,
- * criteria from a cell, not equal, wildcards, date windows and blanks; the Hard ones add two-way summary tables,
- * either-or totals and month-against-month windows.
+ * criteria from a cell, not equal, wildcards, date windows and blanks. The Hard ones work across several workbooks, as
+ * real reports do: two-way grids, either-or totals and month or period windows whose names, rates, targets, limits
+ * and dates are looked up in other open files before the total and the math.
  * Each template makes `count` problems; v (0 to count-1) picks the variant and r is its seeded random.
  */
 (function (root, factory) {
@@ -784,262 +785,474 @@
 
   /* ================= Hard ================= */
 
+  /*
+   * Every Hard problem works across several workbooks, as a real report does: the learner's own file holds the main
+   * data, other open workbooks hold the master, the rates, the targets, the limits or the calendar. The formula looks
+   * them up first, then the conditional total and the math give the report figure. The hidden sheet changes the
+   * other workbooks too (a revised target, a new rate, a moved cut-off), so a typed or copied number fails.
+   */
+  const MASTER = 'master_distributor.xlsx';
+  /* The distributor master, the same in every problem that opens it: ID, name, city, region. */
+  const masterDist = () => H.table([{ h: 'ID', k: 'id' }, { h: 'Distributor', k: 'name' }, { h: 'City', k: 'city' }, { h: 'Region', k: 'region' }], H.db().distributors);
+  const round5m = (x) => Math.max(1, Math.round(x / 5000000)) * 5000000;
+  const kolOf = (d) => (d === 0 ? 1 : d <= 90 ? 2 : d <= 120 ? 3 : d <= 180 ? 4 : 5);
+  const book = (file, name, S, alt) => ({ file, sheets: [{ name, sheet: S, base: S.cells, alt: alt || S.cells }] });
+  const distOf = (name) => H.db().distributors.find((d) => d.name === name);
+  const uniq = (xs) => xs.filter((x, i) => xs.indexOf(x) === i);
+
   P.add({
-    key: 'two-way-summary-table', difficulty: 'Hard', level: 8, topics: ['SUMIFS', 'INDEX', 'MATCH'], count: 4,
+    key: 'two-way-summary-table', difficulty: 'Hard', level: 8, topics: ['SUMIFS', 'INDEX', 'MATCH', 'XLOOKUP', 'Several workbooks'], count: 4, multi: true,
     make(r, v) {
-      const QM = ['Oct', 'Nov', 'Dec'];
-      const qm = (d) => QM[month(H.Q4(d)) - 10];
-      if (v === 0 || v === 3) {
-        /* A summary of net sales by month, built from the full sales book. */
+      const MD = masterDist(), md = H.ext(MASTER, 'Distributor', MD);
+      if (v === 0) {
+        /* A summary grid (distributor and category down, months across), the master for names, a target grid by ID. */
+        const QM = ['Oct', 'Nov', 'Dec'];
+        const qm = (d) => QM[month(H.Q4(d)) - 10];
         const pool = H.db().sales;
-        let rows;
-        if (v === 0) {
-          const g = names(r, 4);
-          rows = [];
-          g.forEach((dn) => H.CATEGORIES.forEach((cat) => {
-            const own = pool.filter((s) => s.distributor === dn && s.category === cat);
-            const o = { distributor: dn, category: cat };
-            QM.forEach((m) => { o[m] = own.filter((s) => qm(s.date) === m).reduce((a, s) => a + s.net, 0); });
-            rows.push(o);
-          }));
-        } else {
-          rows = r.sample(H.db().distributors, 10).map((d) => {
-            const own = pool.filter((s) => s.distributor === d.name);
-            const o = { distributor: d.name, region: d.region };
-            QM.forEach((m) => { o[m] = own.filter((s) => qm(s.date) === m).reduce((a, s) => a + s.net, 0); });
-            return o;
-          });
-          if (!rows.some((x) => x.distributor.startsWith('CV'))) rows[0] = Object.assign({}, rows[0], { distributor: 'CV Nuri Makmur' });
-        }
-        const cols = (v === 0 ? [COL.dist, COL.category] : [COL.dist, COL.region]).concat(QM.map((m) => ({ h: m, k: m, num: true })));
-        const S = H.table(cols, rows);
-        const M = '$C$' + S.first + ':$E$' + S.last, Hd = '$C$4:$E$4';
-        if (v === 0) {
-          const B = S.A('Category'), pickCat = r.shuffle(H.CATEGORIES);
-          const base = Object.assign({}, S.cells, { A1: 'Category', B1: pickCat[0], A2: 'Month', B2: 'Nov', A3: 'Net (Rp)' });
-          const j = rows.findIndex((x) => x.category === pickCat[1]);
-          const alt = H.edit(base, { B1: pickCat[1], B2: 'Dec', [S.cell('Dec', j)]: (x) => x + 3000000 });
-          return H.problem({
-            title: 'Category net for the month in B2 from a summary grid', file: 'ringkasan_q4.xlsx', sheet: S, base, alt, answerCell: 'B3',
-            statement: '<p>The sheet is a summary: one row per distributor and category, one column per month (C4:E4 hold Oct, Nov, Dec). In <b>B3</b>, add up the net of the category in B1 for the month named in B2.</p>',
-            solution: '=SUMIFS(INDEX(' + M + ',0,MATCH(B2,' + Hd + ',0)),' + B + ',B1)',
-            alts: ['=SUMPRODUCT((' + B + '=B1)*(' + Hd + '=B2)*' + M + ')', '=SUMIFS(XLOOKUP(B2,' + Hd + ',' + M + '),' + B + ',B1)', '=SUMIF(' + B + ',B1,INDEX(' + M + ',0,MATCH(B2,' + Hd + ',0)))'],
-            hints: ['SUMIFS needs a single column to add, so first pick the month column out of C5:E' + S.last + '.', 'MATCH(B2,' + Hd + ',0) says which column B2 is; INDEX(' + M + ',0,that number) returns that whole column.', 'Shape: =SUMIFS(INDEX(' + M + ',0,MATCH(B2,' + Hd + ',0)),' + B + ',B1).'],
-            explain: 'INDEX with row 0 returns a whole column, and MATCH finds which one from the month name, so SUMIFS adds the right month for the category in B1. SUMPRODUCT can test the rows and the header at once instead.',
-            chips: [M, Hd, B, 'MATCH(B2,' + Hd + ',0)'], fnKey: 'SUMIFS('
-          });
-        }
-        const A = S.A('Distributor');
-        const base = Object.assign({}, S.cells, { A1: 'Month', B1: 'Oct', A2: 'CV total (Rp)' });
-        const j = rows.findIndex((x) => x.distributor.startsWith('CV'));
-        const alt = H.edit(base, { B1: 'Dec', [S.cell('Dec', j)]: (x) => x + 2500000 });
+        const ds = r.sample(H.db().distributors, 4);
+        const rows = [];
+        ds.forEach((d) => H.CATEGORIES.forEach((cat) => {
+          const own = pool.filter((s) => s.distributor === d.name && s.category === cat);
+          const o = { distributor: d.name, category: cat };
+          QM.forEach((m) => { o[m] = own.filter((s) => qm(s.date) === m).reduce((a, s) => a + s.net, 0); });
+          rows.push(o);
+        }));
+        const S = H.table([COL.dist, COL.category].concat(QM.map((m) => ({ h: m, k: m, num: true }))), rows);
+        const M = '$C$' + S.first + ':$E$' + S.last, Hd = '$C$4:$E$4', A = S.A('Distributor');
+        const actual = (name, m) => pool.filter((s) => s.distributor === name && qm(s.date) === m).reduce((a, s) => a + s.net, 0);
+        const TG = H.table([{ h: 'ID', k: 'id' }].concat(QM.map((m) => ({ h: m, k: m, num: true }))), H.db().distributors.map((d) => {
+          const o = { id: d.id };
+          QM.forEach((m) => { o[m] = round5m(actual(d.name, m) * r.pick([0.8, 0.9, 0.95, 1.05, 1.15, 1.25])); });
+          return o;
+        }));
+        const tg = H.ext('target_bulanan.xlsx', 'Target', TG), grid = tg.T('Oct', 'Dec'), tgHd = tg.prefix + '$B$4:$D$4', tgHdAll = tg.prefix + '$A$4:$D$4';
+        const ms = r.shuffle(QM);
+        const base = Object.assign({}, S.cells, { A1: 'Distributor ID', B1: ds[0].id, A2: 'Month', B2: ms[0], A3: 'Achievement' });
+        /* The hidden sheet: another ID and month, one figure of the grid corrected, and that target revised. */
+        const j = rows.findIndex((x) => x.distributor === ds[1].name && x[ms[1]] > 0);
+        const alt = H.edit(base, { B1: ds[1].id, B2: ms[1], [S.cell(ms[1], j < 0 ? 4 : j)]: (x) => x + 3000000 });
+        const ti = H.db().distributors.findIndex((d) => d.id === ds[1].id);
+        const tgAlt = H.edit(TG.cells, { [TG.cell(ms[1], ti)]: (x) => x + 10000000 });
+        const name = 'XLOOKUP(B1,' + md.A('ID') + ',' + md.A('Distributor') + ')';
         return H.problem({
-          title: 'Net of all CV distributors for the month in B1', file: 'ringkasan_q4.xlsx', sheet: S, base, alt, answerCell: 'B2',
-          statement: '<p>The sheet sums net sales per distributor, with one column per month (C4:E4 hold Oct, Nov, Dec). In <b>B2</b>, add up the month named in B1 for the distributors whose name starts with CV.</p>',
-          solution: '=SUMIFS(INDEX(' + M + ',0,MATCH(B1,' + Hd + ',0)),' + A + ',"CV*")',
-          alts: ['=SUMIFS(XLOOKUP(B1,' + Hd + ',' + M + '),' + A + ',"CV*")', '=SUMIF(' + A + ',"CV*",INDEX(' + M + ',0,MATCH(B1,' + Hd + ',0)))'],
-          hints: ['First choose the month column: MATCH(B1,' + Hd + ',0) gives its position.', 'INDEX(' + M + ',0,position) returns that column for SUMIFS to add, and "CV*" keeps the CV names.', 'Shape: =SUMIFS(INDEX(' + M + ',0,MATCH(B1,' + Hd + ',0)),' + A + ',"CV*").'],
-          explain: 'INDEX and MATCH hand SUMIFS the one month column named in B1, and the wildcard "CV*" keeps only the CV distributors. XLOOKUP on the header row returns the same column.',
-          chips: [M, Hd, A, '"CV*"'], fnKey: 'SUMIFS('
+          title: 'Month net of the distributor ID in B1 against its monthly target', file: 'ringkasan_q4.xlsx', sheetName: 'Ringkasan', sheet: S, base, alt, answerCell: 'B3', precision: 4,
+          books: [{ file: MASTER, sheets: [{ name: 'Distributor', sheet: MD }] }, book('target_bulanan.xlsx', 'Target', TG, tgAlt)],
+          statement: '<p>Three workbooks are open: your Q4 summary (<b>ringkasan_q4.xlsx</b>, one row per distributor and category, one column per month in C4:E4), the distributor master (<b>master_distributor.xlsx</b>, ID and name) and the monthly targets (<b>target_bulanan.xlsx</b>, one row per distributor ID, one column per month).</p><p>B1 holds a distributor ID and B2 a month. In <b>B3</b>, work out the distributor\'s achievement for that month: its net in the month, all categories together, divided by its target for the same month. The summary lists names, not IDs, so find the name in the master first. Leave it as a decimal.</p>',
+          solution: '=SUMIFS(XLOOKUP(B2,' + Hd + ',' + M + '),' + A + ',' + name + ')/INDEX(' + grid + ',MATCH(B1,' + tg.A('ID') + ',0),MATCH(B2,' + tgHd + ',0))',
+          alts: ['=SUMIFS(INDEX(' + M + ',0,MATCH(B2,' + Hd + ',0)),' + A + ',INDEX(' + md.A('Distributor') + ',MATCH(B1,' + md.A('ID') + ',0)))/XLOOKUP(B1,' + tg.A('ID') + ',XLOOKUP(B2,' + tgHd + ',' + grid + '))',
+            '=SUMIF(' + A + ',VLOOKUP(B1,' + md.T('ID', 'Distributor') + ',2,FALSE),INDEX(' + M + ',0,MATCH(B2,' + Hd + ',0)))/VLOOKUP(B1,' + tg.T('ID', 'Dec') + ',MATCH(B2,' + tgHdAll + ',0),FALSE)'],
+          hints: ['Three lookups and one total. The name: ' + name + '. The month column of your grid: XLOOKUP(B2,' + Hd + ',' + M + '). The target: where the ID\'s row meets the month\'s column in target_bulanan.xlsx.',
+            'SUMIFS adds the month column for the rows whose Distributor is that name. For the target, INDEX(target grid, MATCH(B1, ID column, 0), MATCH(B2, month headers, 0)).',
+            'Shape: =SUMIFS(XLOOKUP(B2,' + Hd + ',' + M + '),' + A + ',name from the master)/INDEX(' + grid + ',MATCH(B1,...),MATCH(B2,...)).'],
+          explain: 'The master turns the ID into the name the summary uses, and XLOOKUP on the month headers hands SUMIFS the one month column to add. In the targets file, two MATCHes find the ID\'s row and the month\'s column, and INDEX returns the target where they meet. Net over target is the achievement.',
+          chips: [M, Hd, A, md.A('ID'), md.A('Distributor'), grid, tg.A('ID'), tgHd], fnKey: 'SUMIFS('
         });
       }
       if (v === 1) {
-        /* Facilities with three money columns; pick the column by its header and add only the rows that are not restructured. */
-        const rows = H.loans(r, 16).map((x) => Object.assign({}, x, { undrawn: x.limit - x.outstanding }));
-        const S = H.table([COL.facility, COL.region, COL.restructured, COL.limit, COL.outstanding, { h: 'Undrawn (Rp)', k: 'undrawn', num: true }], rows);
-        const M = '$D$' + S.first + ':$F$' + S.last, Hd = '$D$4:$F$4', B = S.A('Region'), C = S.A('Restructured');
-        const regs = ranked(rows.filter((x) => x.restructured === 'N'), 'region');
-        const base = Object.assign({}, S.cells, { A1: 'Region', B1: regs[0], A2: 'Measure', B2: 'Undrawn (Rp)', A3: 'Total (Rp)' });
-        const j = rows.findIndex((x) => x.region === regs[1] && x.restructured === 'N');
-        const alt = H.edit(base, { B1: regs[1], B2: 'Outstanding (Rp)', [S.cell('Outstanding (Rp)', j)]: (x) => x + 4000000 });
+        /* The loan book, and a provision grid in another workbook: kol down, loan type across. */
+        const rows = H.loans(r, 16).map((x, i) => Object.assign({}, x, { type: i % 3 === 1 ? 'Term Loan' : 'Working Capital', kol: kolOf(x.dpd) }));
+        const S = H.table([COL.facility, COL.dist, COL.type, COL.outstanding, { h: 'Kol', k: 'kol', num: true }], rows);
+        const RATE = { 'Working Capital': [0.01, 0.05, 0.15, 0.5, 1], 'Term Loan': [0.015, 0.06, 0.2, 0.5, 1] };
+        const CK = H.table([{ h: 'Kol', k: 'kol', num: true }, { h: 'Working Capital', k: 'wc', num: true }, { h: 'Term Loan', k: 'tl', num: true }],
+          [1, 2, 3, 4, 5].map((k) => ({ kol: k, wc: RATE['Working Capital'][k - 1], tl: RATE['Term Loan'][k - 1] })));
+        const ck = H.ext('tarif_ckpn.xlsx', 'Ckpn', CK), grid = ck.T('Working Capital', 'Term Loan'), ckHd = ck.prefix + '$B$4:$C$4', ckHdAll = ck.prefix + '$A$4:$C$4';
+        const o = S.R('Outstanding (Rp)'), t = S.R('Type'), k = S.R('Kol');
+        const combos = ranked(rows.filter((x) => x.kol < 5), (x) => x.kol + '|' + x.type).map((s) => { const p = s.split('|'); return [+p[0], p[1]]; });
+        const hp = hiddenPair(rows, 'kol', 'type', combos, 'outstanding', 5000000, total);
+        const base = Object.assign({}, S.cells, { A1: 'Kol', B1: combos[0][0], A2: 'Loan type', B2: combos[0][1], A3: 'Provision (Rp)' });
+        const alt = H.edit(base, { B1: hp.pair[0], B2: hp.pair[1], [S.cell('Outstanding (Rp)', hp.j)]: (x) => x + 5000000 });
+        /* The hidden sheet: the bank revises the rate of the kol and type it asks about. */
+        const ckAlt = H.edit(CK.cells, { [CK.cell(hp.pair[1], hp.pair[0] - 1)]: (x) => Math.round((x + 0.02) * 1000) / 1000 });
+        const rate = 'INDEX(' + grid + ',MATCH(B1,' + ck.A('Kol') + ',0),MATCH(B2,' + ckHd + ',0))';
         return H.problem({
-          title: 'Region total of the loan measure named in B2, not restructured', file: 'buku_pinjaman.xlsx', sheet: S, base, alt, answerCell: 'B3',
-          statement: '<p>B2 holds one of the headers in D4:F4 (Limit, Outstanding or Undrawn). In <b>B3</b>, add up that column for the facilities in the region in B1 whose <b>Restructured</b> flag is <b>N</b>.</p>',
-          solution: '=SUMIFS(INDEX(' + M + ',0,MATCH(B2,' + Hd + ',0)),' + B + ',B1,' + C + ',"N")',
-          alts: ['=SUMIFS(XLOOKUP(B2,' + Hd + ',' + M + '),' + B + ',B1,' + C + ',"N")', '=SUMPRODUCT((' + B + '=B1)*(' + C + '="N")*(' + Hd + '=B2)*' + M + ')', '=SUMIFS(INDEX(' + M + ',0,MATCH(B2,' + Hd + ',0)),' + B + ',B1,' + C + ',"<>Y")'],
-          hints: ['The column to add depends on B2, so find it with MATCH(B2,' + Hd + ',0).', 'INDEX(' + M + ',0,MATCH(...)) is the column to add; then give SUMIFS two pairs: region and the N flag.', 'Shape: =SUMIFS(INDEX(' + M + ',0,MATCH(B2,' + Hd + ',0)),' + B + ',B1,' + C + ',"N").'],
-          explain: 'MATCH turns the header in B2 into a column number and INDEX returns that column, so one formula works for any of the three measures. SUMIFS then keeps the region in B1 and the facilities that were not restructured.',
-          chips: [M, Hd, B, C, '"N"'], fnKey: 'SUMIFS('
+          title: 'Provision for the kol in B1 and loan type in B2 from the rate grid', file: 'buku_pinjaman.xlsx', sheetName: 'Fasilitas', sheet: S, base, alt, answerCell: 'B3',
+          books: [book('tarif_ckpn.xlsx', 'Ckpn', CK, ckAlt)],
+          statement: '<p>Two workbooks are open: the loan book (<b>buku_pinjaman.xlsx</b>, your file) and the provision rates (<b>tarif_ckpn.xlsx</b>: one row per kol from 1 to 5, one column per loan type, each rate a decimal, so 0.05 is 5%).</p><p>In <b>B3</b>, work out the provision for the facilities whose <b>Kol</b> is the one in B1 and whose <b>Type</b> is the one in B2: their total Outstanding times the rate where that kol\'s row meets that type\'s column in the rate grid.</p>',
+          solution: '=SUMIFS(' + o + ',' + k + ',B1,' + t + ',B2)*' + rate,
+          alts: ['=SUMIFS(' + o + ',' + t + ',B2,' + k + ',B1)*XLOOKUP(B1,' + ck.A('Kol') + ',XLOOKUP(B2,' + ckHd + ',' + grid + '))',
+            '=SUMIFS(' + o + ',' + k + ',B1,' + t + ',B2)*VLOOKUP(B1,' + ck.T('Kol', 'Term Loan') + ',MATCH(B2,' + ckHdAll + ',0),FALSE)',
+            '=SUMPRODUCT((' + k + '=B1)*(' + t + '=B2)*' + o + ')*' + rate],
+          hints: ['Two parts: the balance (a SUMIFS on your sheet with two conditions) and the rate (a lookup in tarif_ckpn.xlsx that needs both the row and the column).',
+            'MATCH(B1,' + ck.A('Kol') + ',0) finds the kol\'s row and MATCH(B2,' + ckHd + ',0) the type\'s column; INDEX(' + grid + ', row, column) returns the rate.',
+            'Shape: =SUMIFS(' + o + ',' + k + ',B1,' + t + ',B2)*' + rate + '.'],
+          explain: 'SUMIFS adds the outstanding of the facilities with that kol and type. INDEX with two MATCHes reads the rate at the crossing of the kol\'s row and the type\'s column in the other workbook. The balance times the rate is the provision, and a revised rate in tarif_ckpn.xlsx flows straight into the answer.',
+          chips: [o, k, t, grid, ck.A('Kol'), ckHd], fnKey: 'SUMIFS('
         });
       }
-      /* v 2: a stock grid, products down and warehouses across; a SKU family and a warehouse from cells. */
-      const rows = H.PRODUCTS.map((p) => { const o = { sku: p.sku, product: p.name }; H.WAREHOUSES.forEach((w) => { o[w] = r.int(0, 40) * 10; }); return o; });
-      const S = H.table([COL.sku, COL.product].concat(H.WAREHOUSES.map((w) => ({ h: w, k: w, num: true }))), rows);
-      const M = '$C$' + S.first + ':$G$' + S.last, Hd = '$C$4:$G$4', A = S.A('SKU');
-      const fams = r.shuffle(['MLK', 'KSJ', 'SNY', 'SRW']), whs = r.sample(H.WAREHOUSES, 2);
-      const base = Object.assign({}, S.cells, { A1: 'SKU family', B1: fams[0], A2: 'Warehouse', B2: whs[0], A3: 'On hand' });
-      const j = rows.findIndex((x) => family(x.sku) === fams[1]);
-      const alt = H.edit(base, { B1: fams[1], B2: whs[1], [S.cell(whs[1], j)]: (x) => x + 50 });
+      if (v === 2) {
+        /* A stock grid (SKU down, warehouse across), the map of which warehouse serves each region, weekly demand. */
+        const rows = H.PRODUCTS.map((p) => { const o = { sku: p.sku, product: p.name, category: p.category }; H.WAREHOUSES.forEach((w) => { o[w] = r.int(2, 40) * 10; }); return o; });
+        const S = H.table([COL.sku, COL.product, COL.category].concat(H.WAREHOUSES.map((w) => ({ h: w, k: w, num: true }))), rows);
+        const M = '$D$' + S.first + ':$H$' + S.last, Hd = '$D$4:$H$4', C = S.A('Category');
+        const SERVE = { Jabodetabek: 'Gudang Bekasi', 'Jawa Barat': 'Gudang Bandung', 'Jawa Tengah': 'Gudang Semarang', 'Jawa Timur': 'Gudang Surabaya', 'Bali Nusra': 'Gudang Surabaya', Sumatera: 'Gudang Medan', Sulawesi: 'Gudang Surabaya' };
+        const GD = H.table([{ h: 'Region', k: 'region' }, { h: 'Warehouse', k: 'wh' }], H.REGIONS.map((g) => ({ region: g, wh: SERVE[g] })));
+        const DM = H.table([{ h: 'Warehouse', k: 'wh' }].concat(H.CATEGORIES.map((c) => ({ h: c, k: c, num: true }))),
+          H.WAREHOUSES.map((w) => { const o = { wh: w }; H.CATEGORIES.forEach((c) => { o[c] = r.int(3, 24) * 5; }); return o; }));
+        const gd = H.ext('peta_gudang.xlsx', 'Gudang', GD), dm = H.ext('permintaan.xlsx', 'Mingguan', DM);
+        const grid = dm.T('Noodles', 'Soap'), dmHd = dm.prefix + '$B$4:$E$4', dmHdAll = dm.prefix + '$A$4:$E$4';
+        const reg0 = r.pick(H.REGIONS), w0 = SERVE[reg0];
+        const reg1 = r.pick(H.REGIONS.filter((g) => SERVE[g] !== w0));
+        const w1 = r.pick(H.WAREHOUSES.filter((w) => w !== w0 && w !== SERVE[reg1]));
+        const cats = r.shuffle(H.CATEGORIES);
+        const base = Object.assign({}, S.cells, { A1: 'Region', B1: reg0, A2: 'Category', B2: cats[0], A3: 'Weeks of cover' });
+        /* The hidden sheet: another region and category, that region now served from another warehouse, demand revised. */
+        const sj = rows.findIndex((x) => x.category === cats[1]);
+        const alt = H.edit(base, { B1: reg1, B2: cats[1], [S.cell(w1, sj)]: (x) => x + 30 });
+        const gdAlt = H.edit(GD.cells, { [GD.cell('Warehouse', H.REGIONS.indexOf(reg1))]: w1 });
+        const dmAlt = H.edit(DM.cells, { [DM.cell(cats[1], H.WAREHOUSES.indexOf(w1))]: (x) => x + 10 });
+        const W = 'XLOOKUP(B1,' + gd.A('Region') + ',' + gd.A('Warehouse') + ')';
+        const Wv = 'VLOOKUP(B1,' + gd.T('Region', 'Warehouse') + ',2,FALSE)';
+        return H.problem({
+          title: 'Weeks of stock cover for a region, warehouse map and demand apart', file: 'stok_gudang.xlsx', sheetName: 'Stok', sheet: S, base, alt, answerCell: 'B3', precision: 4,
+          books: [book('peta_gudang.xlsx', 'Gudang', GD, gdAlt), book('permintaan.xlsx', 'Mingguan', DM, dmAlt)],
+          statement: '<p>Three workbooks are open: your stock grid (<b>stok_gudang.xlsx</b>, one row per SKU, one column of on-hand cartons per warehouse in D4:H4), the warehouse map (<b>peta_gudang.xlsx</b>, which warehouse serves each region) and the weekly demand (<b>permintaan.xlsx</b>, one row per warehouse, one column per category, in cartons a week).</p><p>In <b>B3</b>, work out how many weeks the stock lasts: the on-hand cartons of the category in B2 in the warehouse that serves the region in B1, divided by that warehouse\'s weekly demand for the category. Leave it as a decimal.</p>',
+          solution: '=SUMIFS(XLOOKUP(' + W + ',' + Hd + ',' + M + '),' + C + ',B2)/INDEX(' + grid + ',MATCH(' + W + ',' + dm.A('Warehouse') + ',0),MATCH(B2,' + dmHd + ',0))',
+          alts: ['=LET(w,' + W + ',SUMIFS(XLOOKUP(w,' + Hd + ',' + M + '),' + C + ',B2)/XLOOKUP(w,' + dm.A('Warehouse') + ',XLOOKUP(B2,' + dmHd + ',' + grid + ')))',
+            '=SUMIFS(INDEX(' + M + ',0,MATCH(' + Wv + ',' + Hd + ',0)),' + C + ',B2)/VLOOKUP(' + Wv + ',' + dm.T('Warehouse', 'Soap') + ',MATCH(B2,' + dmHdAll + ',0),FALSE)',
+            '=SUMIF(' + C + ',B2,XLOOKUP(' + W + ',' + Hd + ',' + M + '))/INDEX(' + grid + ',MATCH(' + W + ',' + dm.A('Warehouse') + ',0),MATCH(B2,' + dmHd + ',0))'],
+          hints: ['Start with the warehouse: ' + W + ' reads it from peta_gudang.xlsx. Everything else uses that name.',
+            'The stock: XLOOKUP(warehouse,' + Hd + ',' + M + ') returns that warehouse\'s column, and SUMIFS adds the rows of the category in B2. The demand: INDEX(' + grid + ', MATCH(warehouse, ...), MATCH(B2, ...)) in permintaan.xlsx. LET(w, ..., ...) lets you write the warehouse lookup once.',
+            'Shape: =SUMIFS(XLOOKUP(warehouse,' + Hd + ',' + M + '),' + C + ',B2)/INDEX(' + grid + ',MATCH(warehouse,' + dm.A('Warehouse') + ',0),MATCH(B2,' + dmHd + ',0)).'],
+          explain: 'The warehouse lookup feeds two places: it picks the stock column in your grid and the demand row in permintaan.xlsx. SUMIFS adds the category\'s cartons in that column, and stock divided by weekly demand is the weeks of cover. When the map moves a region to another warehouse, the same formula follows it.',
+          chips: [M, Hd, C, gd.A('Region'), gd.A('Warehouse'), grid, dm.A('Warehouse'), dmHd], fnKey: 'SUMIFS('
+        });
+      }
+      /* v 3: sales lines without prices, the master for each distributor's region, a price list by SKU and region. */
+      const regs = r.sample(H.REGIONS, 4);
+      const dn = regs.map((g) => r.pick(H.db().distributors.filter((d) => d.region === g)).name);
+      const rows = lines(r, 18, (s) => dn.includes(s.distributor));
+      const S = H.table([COL.date, COL.dist, COL.sku, COL.cartons], rows);
+      const b = S.R('Distributor'), k = S.R('SKU'), c = S.R('Cartons');
+      const FACTOR = { Jabodetabek: 1, 'Jawa Barat': 0.98, 'Jawa Tengah': 0.96, 'Jawa Timur': 0.97, 'Bali Nusra': 1.04, Sumatera: 1.06, Sulawesi: 1.08 };
+      const HG = H.table([COL.sku].concat(H.REGIONS.map((g) => ({ h: g, k: g, num: true }))),
+        H.PRODUCTS.map((p) => { const o = { sku: p.sku }; H.REGIONS.forEach((g) => { o[g] = Math.round(p.carton_price * FACTOR[g] / 1000) * 1000; }); return o; }));
+      const hg = H.ext('harga_regional.xlsx', 'Harga', HG), grid = hg.T(H.REGIONS[0], H.REGIONS[6]), hgHd = hg.prefix + '$B$4:$H$4', hgHdAll = hg.prefix + '$A$4:$H$4';
+      const combos = ranked(rows, (x) => x.distributor + '|' + x.sku).map((s) => s.split('|'));
+      const hp = hiddenPair(rows, 'distributor', 'sku', combos, 'cartons', 6, total);
+      const base = Object.assign({}, S.cells, { A1: 'Distributor', B1: combos[0][0], A2: 'SKU', B2: combos[0][1], A3: 'List value (Rp)' });
+      /* The hidden sheet: another distributor (in another region) and SKU, and that regional price goes up. */
+      const alt = H.edit(base, { B1: hp.pair[0], B2: hp.pair[1], [S.cell('Cartons', hp.j)]: (x) => x + 6 });
+      const hgAlt = H.edit(HG.cells, { [HG.cell(distOf(hp.pair[0]).region, H.PRODUCTS.findIndex((p) => p.sku === hp.pair[1]))]: (x) => x + 4000 });
+      const RG = 'XLOOKUP(B1,' + md.A('Distributor') + ',' + md.A('Region') + ')';
+      const total0 = 'SUMIFS(' + c + ',' + b + ',B1,' + k + ',B2)';
       return H.problem({
-        title: 'Stock grid: one SKU family in the warehouse named in B2', file: 'stok_gudang.xlsx', sheet: S, base, alt, answerCell: 'B3',
-        statement: '<p>The grid has one row per SKU and one column per warehouse (C4:G4). In <b>B3</b>, add up the on-hand cartons of the SKUs that start with the family code in B1 (such as KSJ) in the warehouse named in B2.</p>',
-        solution: '=SUMIFS(INDEX(' + M + ',0,MATCH(B2,' + Hd + ',0)),' + A + ',B1&"*")',
-        alts: ['=SUMIFS(XLOOKUP(B2,' + Hd + ',' + M + '),' + A + ',B1&"*")', '=SUMIF(' + A + ',B1&"-*",INDEX(' + M + ',0,MATCH(B2,' + Hd + ',0)))'],
-        hints: ['Pick the warehouse column first: INDEX(' + M + ',0,MATCH(B2,' + Hd + ',0)).', 'The rows are chosen by a starts-with pattern built from B1: B1&"*".', 'Shape: =SUMIFS(INDEX(' + M + ',0,MATCH(B2,' + Hd + ',0)),' + A + ',B1&"*").'],
-        explain: 'INDEX and MATCH return the column of the warehouse in B2, and B1&"*" keeps the SKUs of that family. Two inputs drive one SUMIFS, so the grid answers any family and warehouse pair.',
-        chips: [M, Hd, A, 'B1&"*"'], fnKey: 'SUMIFS('
+        title: 'Cartons of one SKU at the regional list price, from three files', file: 'penjualan_q4.xlsx', sheetName: 'Penjualan', sheet: S, base, alt, answerCell: 'B3',
+        books: [{ file: MASTER, sheets: [{ name: 'Distributor', sheet: MD }] }, book('harga_regional.xlsx', 'Harga', HG, hgAlt)],
+        statement: '<p>Three workbooks are open: your Q4 sales lines (<b>penjualan_q4.xlsx</b>, no prices), the distributor master (<b>master_distributor.xlsx</b>, with each distributor\'s region) and the regional price list (<b>harga_regional.xlsx</b>: one row per SKU, one column per region, the carton price in Rp).</p><p>In <b>B3</b>, work out what the distributor in B1 bought of the SKU in B2 at its list price: its total Cartons of that SKU times the carton price of that SKU in the distributor\'s own region.</p>',
+        solution: '=' + total0 + '*INDEX(' + grid + ',MATCH(B2,' + hg.A('SKU') + ',0),MATCH(' + RG + ',' + hgHd + ',0))',
+        alts: ['=' + total0 + '*XLOOKUP(B2,' + hg.A('SKU') + ',XLOOKUP(' + RG + ',' + hgHd + ',' + grid + '))',
+          '=' + total0 + '*VLOOKUP(B2,' + hg.T('SKU', H.REGIONS[6]) + ',MATCH(VLOOKUP(B1,' + md.T('Distributor', 'Region') + ',3,FALSE),' + hgHdAll + ',0),FALSE)',
+          '=SUMPRODUCT((' + b + '=B1)*(' + k + '=B2)*' + c + ')*INDEX(' + grid + ',MATCH(B2,' + hg.A('SKU') + ',0),MATCH(' + RG + ',' + hgHd + ',0))'],
+        hints: ['The price depends on the SKU and on the region, and your sheet has no region: ' + RG + ' brings it from the master.',
+          'In harga_regional.xlsx, MATCH(B2,' + hg.A('SKU') + ',0) gives the row and MATCH(region,' + hgHd + ',0) the column; INDEX(' + grid + ', row, column) is the price. The cartons come from a SUMIFS with two conditions.',
+          'Shape: =' + total0 + '*INDEX(' + grid + ',MATCH(B2,...),MATCH(' + RG + ',' + hgHd + ',0)).'],
+        explain: 'SUMIFS adds the cartons of that distributor and SKU on your sheet. The master gives the distributor\'s region, which picks the column of the price list, while the SKU picks the row. Cartons times that regional price is the list value, and a price change in harga_regional.xlsx moves the answer with it.',
+        chips: [c, b, k, md.A('Distributor'), md.A('Region'), grid, hg.A('SKU'), hgHd], fnKey: 'SUMIFS('
       });
     }
   });
 
   P.add({
-    key: 'either-or-totals', difficulty: 'Hard', level: 9, topics: ['SUMIFS', 'COUNTIFS', 'OR logic'], count: 3,
+    key: 'either-or-totals', difficulty: 'Hard', level: 9, topics: ['SUMIFS', 'SUMPRODUCT', 'OR logic', 'XLOOKUP', 'Several workbooks'], count: 3, multi: true,
     make(r, v) {
       if (v === 0) {
-        /* OR on two columns at once: either of two regions, and either of two categories. */
-        const g = r.sample(H.REGIONS, 4);
-        const rows = lines(r, 18, (s) => g.includes(s.region)), S = H.table([COL.date, COL.region, COL.category, COL.net], rows);
-        const q = S.R('Region'), c = S.R('Category'), s = S.R('Net (Rp)');
-        const cats = ranked(rows, 'category').slice(0, 2), inCat = (x) => cats.includes(x.category);
-        const regs = ranked(rows.filter(inCat), 'region').concat(g).filter((x, i, a) => a.indexOf(x) === i);
-        const pair = [regs[0], regs[2]], other = [regs[1], regs[3]];
-        const base = Object.assign({}, S.cells, { A1: 'Region 1', B1: pair[0], A2: 'Region 2', B2: pair[1], A3: cats[0] + ' or ' + cats[1] + ' (Rp)' });
-        /* The hidden sheet: two other regions in B1 and B2, and one of their lines is corrected. */
-        const j = rows.findIndex((x) => x.region === other[0] && inCat(x));
-        const edits = { B1: other[0], B2: other[1] };
-        if (j >= 0) edits[S.cell('Net (Rp)', j)] = (x) => x + 2200000;
-        const alt = H.edit(base, edits);
-        const one = (reg, cat) => 'SUMIFS(' + s + ',' + q + ',' + reg + ',' + c + ',"' + cat + '")';
-        const sol = '=' + one('B1', cats[0]) + '+' + one('B1', cats[1]) + '+' + one('B2', cats[0]) + '+' + one('B2', cats[1]);
-        const sp = '=SUMPRODUCT(((' + q + '=B1)+(' + q + '=B2))*((' + c + '="' + cats[0] + '")+(' + c + '="' + cats[1] + '"))*' + s + ')';
+        /* A rep covers two regions: net of either area, over the rep's target. Roster and targets are separate files. */
+        const g = r.sample(H.REGIONS, 5);
+        const rows = lines(r, 20, (s) => g.includes(s.region)), S = H.table([COL.date, COL.dist, COL.region, COL.category, COL.net], rows);
+        const q = S.R('Region'), n = S.R('Net (Rp)');
+        const pr = uniq(ranked(rows, 'region').concat(g));
+        const has = (reg) => rows.some((x) => x.region === reg);
+        const who = r.sample(H.REPS, 6);
+        const roster = who.map((name, i) => {
+          if (i === 0) return { name, a1: pr[0], a2: pr[2] };
+          if (i === 1) return { name, a1: pr[1], a2: pr[3] };
+          const two = r.sample(H.REGIONS, 2);
+          return { name, a1: two[0], a2: two[1] };
+        });
+        const net = (rep) => sumOf(rows, (x) => x.region === rep.a1 || x.region === rep.a2, 'net');
+        const tRows = r.shuffle(roster).map((rep) => ({ name: rep.name, target: round5m(net(rep) * r.pick([0.85, 0.95, 1.05, 1.15, 1.3])) }));
+        const order = r.shuffle(roster);
+        const RP = H.table([COL.rep, { h: 'Area 1', k: 'a1' }, { h: 'Area 2', k: 'a2' }], order);
+        const TG = H.table([COL.rep, { h: 'Q4 target (Rp)', k: 'target', num: true }], tRows);
+        const rp = H.ext('daftar_rep.xlsx', 'Rep', RP), tg = H.ext('target_rep.xlsx', 'Target', TG);
+        const base = Object.assign({}, S.cells, { A1: 'Rep', B1: who[0], A2: 'Achievement' });
+        /* The hidden sheet: another rep, who has been given a new second area, and a revised target. */
+        const hi = order.findIndex((x) => x.name === who[1]);
+        const newArea = has(pr[4]) ? pr[4] : pr[0];
+        const rpAlt = H.edit(RP.cells, { [RP.cell('Area 2', hi)]: newArea });
+        const tgAlt = H.edit(TG.cells, { [TG.cell('Q4 target (Rp)', tRows.findIndex((x) => x.name === who[1]))]: (x) => x + 10000000 });
+        const j = rows.findIndex((x) => x.region === pr[1]);
+        const alt = H.edit(base, { B1: who[1], [S.cell('Net (Rp)', j < 0 ? 0 : j)]: (x) => x + 2000000 });
+        const a1 = 'XLOOKUP(B1,' + rp.A('Rep') + ',' + rp.A('Area 1') + ')', a2 = 'XLOOKUP(B1,' + rp.A('Rep') + ',' + rp.A('Area 2') + ')';
+        const T = 'XLOOKUP(B1,' + tg.A('Rep') + ',' + tg.A('Q4 target (Rp)') + ')';
         return H.problem({
-          title: cats[0] + ' or ' + cats[1] + ' net for the two regions in B1 and B2', file: 'penjualan_q4.xlsx', sheet: S, base, alt, answerCell: 'B3',
-          statement: '<p>In <b>B3</b>, add up <b>Net</b> (' + s + ') for the lines whose <b>Region</b> (' + q + ') is the one in B1 <b>or</b> the one in B2, and whose <b>Category</b> (' + c + ') is <b>' + cats[0] + '</b> <b>or</b> <b>' + cats[1] + '</b>. A line counts when both tests pass.</p>',
-          solution: sol,
-          alts: [sp, '=' + one('B1', cats[0]) + '+' + one('B2', cats[0]) + '+' + one('B1', cats[1]) + '+' + one('B2', cats[1]),
-            '=SUMPRODUCT(((' + q + '=B1)+(' + q + '=B2))*((' + c + '="' + cats[1] + '")+(' + c + '="' + cats[0] + '")),' + s + ')'],
-          hints: ['SUMIFS joins its conditions with AND, so each choice needs its own SUMIFS: two regions times two categories makes four.', 'A line has one region and one category, so the four totals never share a line and can be added. In SUMPRODUCT, + between two tests works as OR and * as AND.', 'Shape: =SUMIFS(net,region,B1,category,"' + cats[0] + '")+SUMIFS(net,region,B1,category,"' + cats[1] + '")+ the same two for B2, or ' + sp + '.'],
-          explain: 'Every line belongs to one region and one category, so the four region and category totals do not overlap and their sum is the OR on both columns. SUMPRODUCT gets there in one step: each bracket of + is 1 when either test passes, and * keeps the lines where both brackets are 1.',
-          chips: [s, q, c, '"' + cats[0] + '"', '"' + cats[1] + '"'], fnKey: 'SUMIFS('
+          title: 'Achievement of a rep who covers two areas, roster and targets apart', file: 'penjualan_q4.xlsx', sheetName: 'Penjualan', sheet: S, base, alt, answerCell: 'B2', precision: 4,
+          books: [book('daftar_rep.xlsx', 'Rep', RP, rpAlt), book('target_rep.xlsx', 'Target', TG, tgAlt)],
+          statement: '<p>Three workbooks are open: your Q4 sales lines (<b>penjualan_q4.xlsx</b>), the rep roster (<b>daftar_rep.xlsx</b>: every rep covers two regions, Area 1 and Area 2) and the Q4 targets (<b>target_rep.xlsx</b>, one target per rep).</p><p>In <b>B2</b>, work out the achievement of the rep in B1: the Net of the lines whose <b>Region</b> is <b>either</b> of the rep\'s two areas, divided by the rep\'s Q4 target. Leave it as a decimal.</p>',
+          solution: '=(SUMIFS(' + n + ',' + q + ',' + a1 + ')+SUMIFS(' + n + ',' + q + ',' + a2 + '))/' + T,
+          alts: ['=(SUMIFS(' + n + ',' + q + ',VLOOKUP(B1,' + rp.T('Rep', 'Area 2') + ',2,FALSE))+SUMIFS(' + n + ',' + q + ',VLOOKUP(B1,' + rp.T('Rep', 'Area 2') + ',3,FALSE)))/VLOOKUP(B1,' + tg.T('Rep', 'Q4 target (Rp)') + ',2,FALSE)',
+            '=SUMPRODUCT(((' + q + '=' + a1 + ')+(' + q + '=' + a2 + '))*' + n + ')/' + T,
+            '=(SUMIF(' + q + ',INDEX(' + rp.A('Area 1') + ',MATCH(B1,' + rp.A('Rep') + ',0)),' + n + ')+SUMIF(' + q + ',INDEX(' + rp.A('Area 2') + ',MATCH(B1,' + rp.A('Rep') + ',0)),' + n + '))/INDEX(' + tg.A('Q4 target (Rp)') + ',MATCH(B1,' + tg.A('Rep') + ',0))'],
+          hints: ['Look up the rep\'s two areas in daftar_rep.xlsx and the target in target_rep.xlsx. The two files list the reps in different orders, so look each one up by name.',
+            'SUMIFS joins conditions with AND, so either area needs its own SUMIFS; a line has one region, so the two totals never overlap and can be added.',
+            'Shape: =(SUMIFS(' + n + ',' + q + ',' + a1 + ')+SUMIFS(' + n + ',' + q + ',' + a2 + '))/' + T + '.'],
+          explain: 'Each XLOOKUP into the roster returns one area, which becomes the condition of its own SUMIFS. A line belongs to one region, so adding the two totals is the OR. The target comes from a third file, and net over target is the achievement. When the roster gives the rep a new area, the same formula follows it.',
+          chips: [n, q, rp.A('Rep'), rp.A('Area 1'), rp.A('Area 2'), tg.A('Rep'), tg.A('Q4 target (Rp)')], fnKey: 'SUMIFS('
         });
       }
       if (v === 1) {
-        /* Overlapping OR: restructured, or more than B1 days past due. Count the overlap once. */
-        const rows = H.loans(r, 16);
-        rows[2] = Object.assign({}, rows[2], { restructured: 'Y', dpd: 120 });
-        rows[7] = Object.assign({}, rows[7], { restructured: 'N', dpd: 95 });
-        rows[11] = Object.assign({}, rows[11], { restructured: 'Y', dpd: 0 });
-        /* One facility sits on the visible limit (90, so "more than" leaves it out) and one between the two limits. */
-        rows[4] = Object.assign({}, rows[4], { restructured: 'N', dpd: 90 });
-        rows[13] = Object.assign({}, rows[13], { restructured: 'N', dpd: 75 });
-        const S = H.table([COL.facility, COL.dist, COL.outstanding, COL.restructured, COL.dpd], rows);
-        const o = S.R('Outstanding (Rp)'), y = S.R('Restructured'), d = S.R('DPD');
-        const base = Object.assign({}, S.cells, { A1: 'DPD above', B1: 90, A2: 'Watch list (Rp)' });
-        const alt = H.edit(base, { B1: 60, [S.cell('Outstanding (Rp)', 2)]: (x) => x + 5000000 });
+        /* Facilities for review: past the policy's DPD or past its use cap. The overlap counts once. */
+        const TL = [1, 4, 6, 9, 12, 14];
+        const rows = H.loans(r, 16).map((x, i) => ({ facility: x.facility, distributor: x.distributor, type: TL.includes(i) ? 'Term Loan' : 'Working Capital', limit: x.limit, outstanding: x.outstanding, dpd: x.dpd }));
+        const set = (i, o) => { rows[i] = Object.assign({}, rows[i], o); };
+        /* Working Capital, policy 60 days and 0.85 of the limit. */
+        set(0, { limit: 100000000, outstanding: 92000000, dpd: 75 });
+        set(2, { limit: 150000000, outstanding: 75000000, dpd: 95 });
+        set(3, { limit: 200000000, outstanding: 196000000, dpd: 0 });
+        set(5, { limit: 75000000, outstanding: 36000000, dpd: 60 });
+        /* Term Loan, policy 30 days and 0.9; the hidden sheet's revised policy is 45 days and 0.8. */
+        set(1, { limit: 150000000, outstanding: 127500000, dpd: 0 });
+        set(4, { limit: 100000000, outstanding: 50000000, dpd: 45 });
+        set(6, { limit: 200000000, outstanding: 190000000, dpd: 60 });
+        set(9, { limit: 50000000, outstanding: 20000000, dpd: 95 });
+        /* Only the revised 45 days catches this one, so the old Max DPD typed as a number fails. */
+        set(14, { limit: 75000000, outstanding: 37500000, dpd: 50 });
+        const S = H.table([COL.facility, COL.dist, COL.type, COL.limit, COL.outstanding, COL.dpd], rows);
+        const t = S.R('Type'), l = S.R('Limit (Rp)'), o = S.R('Outstanding (Rp)'), d = S.R('DPD');
+        const KB = H.table([{ h: 'Type', k: 'type' }, { h: 'Max DPD', k: 'dpd', num: true }, { h: 'Max use', k: 'use', num: true }],
+          [{ type: 'Working Capital', dpd: 60, use: 0.85 }, { type: 'Term Loan', dpd: 30, use: 0.9 }, { type: 'Trade Finance', dpd: 45, use: 0.8 }]);
+        const kb = H.ext('kebijakan_kredit.xlsx', 'Kebijakan', KB);
+        const kbAlt = H.edit(KB.cells, { [KB.cell('Max DPD', 1)]: 45, [KB.cell('Max use', 1)]: 0.8 });
+        const base = Object.assign({}, S.cells, { A1: 'Loan type', B1: 'Working Capital', A2: 'For review (Rp)' });
+        const alt = H.edit(base, { B1: 'Term Loan', [S.cell('Outstanding (Rp)', 6)]: (x) => x + 5000000 });
+        const X = 'XLOOKUP(B1,' + kb.A('Type') + ',' + kb.A('Max DPD') + ')', Y = 'XLOOKUP(B1,' + kb.A('Type') + ',' + kb.A('Max use') + ')';
+        const Xv = 'VLOOKUP(B1,' + kb.T('Type', 'Max use') + ',2,FALSE)', Yv = 'VLOOKUP(B1,' + kb.T('Type', 'Max use') + ',3,FALSE)';
+        const sol = '=SUMPRODUCT((' + t + '=B1)*(((' + d + '>' + X + ')+(' + o + '>' + l + '*' + Y + '))>0)*' + o + ')';
         return H.problem({
-          title: 'Watch list balance: restructured or past the DPD in B1', file: 'buku_pinjaman.xlsx', sheet: S, base, alt, answerCell: 'B2',
-          statement: '<p>Citra\'s watch list holds every facility that is restructured (<b>Y</b> in ' + y + ') <b>or</b> whose <b>DPD</b> (' + d + ') is <b>more than</b> the number of days in B1. In <b>B2</b>, add up their <b>Outstanding</b> (' + o + '), counting a facility that meets both tests only once.</p>',
-          solution: '=SUMIF(' + y + ',"Y",' + o + ')+SUMIF(' + d + ',">"&B1,' + o + ')-SUMIFS(' + o + ',' + y + ',"Y",' + d + ',">"&B1)',
-          alts: ['=SUMIF(' + y + ',"Y",' + o + ')+SUMIFS(' + o + ',' + y + ',"N",' + d + ',">"&B1)', '=SUMPRODUCT(((' + y + '="Y")+(' + d + '>B1)>0)*' + o + ')', '=SUMIFS(' + o + ',' + y + ',"Y")+SUMIFS(' + o + ',' + y + ',"<>Y",' + d + ',">"&B1)'],
-          hints: ['Adding the restructured total and the past-due total counts a facility that is both twice.', 'Take the overlap away once: a SUMIFS with both conditions. Or add the restructured ones plus the past-due ones that are not restructured.', 'Shape: =SUMIF(' + y + ',"Y",' + o + ')+SUMIF(' + d + ',">"&B1,' + o + ')-SUMIFS(' + o + ',' + y + ',"Y",' + d + ',">"&B1).'],
-          explain: 'A or B equals A plus B minus the rows that are both, so subtracting the two-condition SUMIFS removes the double count. Splitting into restructured plus past due and not restructured gives the same total.',
-          chips: [o, y, d, '">"&B1', '"Y"'], fnKey: 'SUMIFS('
+          title: 'Loans for review: past the DPD or the use cap in the policy file', file: 'buku_pinjaman.xlsx', sheetName: 'Fasilitas', sheet: S, base, alt, answerCell: 'B2',
+          books: [book('kebijakan_kredit.xlsx', 'Kebijakan', KB, kbAlt)],
+          statement: '<p>Two workbooks are open: the loan book (<b>buku_pinjaman.xlsx</b>, your file) and the credit policy (<b>kebijakan_kredit.xlsx</b>: for each loan type a <b>Max DPD</b> and a <b>Max use</b>, the highest outstanding as a share of the limit, as a decimal).</p><p>A facility of the type in B1 goes on Citra\'s review list when its <b>DPD</b> is <b>more than</b> the policy\'s Max DPD <b>or</b> its <b>Outstanding</b> is <b>more than</b> Max use times its <b>Limit</b>. In <b>B2</b>, add up the Outstanding of the facilities on the list, counting a facility that breaks both rules once.</p>',
+          solution: sol,
+          alts: ['=SUMIFS(' + o + ',' + t + ',B1,' + d + ',">"&' + X + ')+SUMPRODUCT((' + t + '=B1)*(' + d + '<=' + X + ')*(' + o + '>' + l + '*' + Y + ')*' + o + ')',
+            '=SUMPRODUCT((' + t + '=B1)*(((' + d + '>' + Xv + ')+(' + o + '>' + l + '*' + Yv + '))>0)*' + o + ')',
+            '=SUMPRODUCT((' + t + '=B1)*(' + d + '>' + X + ')*' + o + ')+SUMPRODUCT((' + t + '=B1)*(' + o + '>' + l + '*' + Y + ')*' + o + ')-SUMPRODUCT((' + t + '=B1)*(' + d + '>' + X + ')*(' + o + '>' + l + '*' + Y + ')*' + o + ')'],
+          hints: ['Look up the two policy values for the type in B1 first: ' + X + ' and ' + Y + '.',
+            'The use rule compares two columns row by row (Outstanding against Limit times Max use), which SUMIFS cannot do, so use SUMPRODUCT. In it, + between two tests is OR, and (test1+test2)>0 is 1 once, even when both pass.',
+            'Shape: =SUMPRODUCT((' + t + '=B1)*(((' + d + '>Max DPD)+(' + o + '>' + l + '*Max use))>0)*' + o + ').'],
+          explain: 'The two XLOOKUPs bring the type\'s Max DPD and Max use from the policy file. Inside SUMPRODUCT, each rule gives 1 or 0 per row; adding them and testing >0 keeps a row that breaks either rule, and counts it once when it breaks both. Multiplying by the type test and Outstanding gives the review total. When the policy is revised, the answer follows it.',
+          chips: [o, l, d, t, kb.A('Type'), kb.A('Max DPD'), kb.A('Max use')], fnKey: 'SUMPRODUCT('
         });
       }
-      const rows = lines(r, 16), S = H.table([COL.date, COL.dist, COL.product, COL.cartons], rows);
-      const b = S.R('Distributor'), c = S.R('Cartons');
-      /* The limit is low enough that at least one CV line is also big, so the overlap matters. */
-      const cvMax = Math.max.apply(null, rows.filter((x) => x.distributor.startsWith('CV')).map((x) => x.cartons).concat([0]));
-      const all = sorted(rows, 'cartons');
-      const lim = [Math.min(cvMax || all[9], all[9]), all[6]];
-      const base = Object.assign({}, S.cells, { A1: 'Cartons at least', B1: lim[0], A2: 'Lines' });
-      const ud = where(rows, (x) => x.distributor.startsWith('UD'));
-      const alt = H.edit(base, { B1: lim[1], [S.cell('Cartons', ud[0] === undefined ? 0 : ud[0])]: (x) => x + 40 });
+      /* v 2: a region's bonus pool: lines of the focus SKU or of at least the minimum cartons, rules in another file. */
+      const g = r.sample(H.REGIONS, 3);
+      const rows = lines(r, 21, (s) => g.includes(s.region)), S = H.table([COL.date, COL.region, COL.sku, COL.cartons, COL.net], rows);
+      const q = S.R('Region'), k = S.R('SKU'), c = S.R('Cartons'), n = S.R('Net (Rp)');
+      const regs = uniq(ranked(rows, 'region').concat(g));
+      /* The rule for a region: its n-th most common SKU as the focus, and a minimum that one of its lines meets exactly. */
+      const rule = (reg, nth) => {
+        const own = rows.filter((x) => x.region === reg);
+        const skus = ranked(own, 'sku');
+        const focus = skus[nth] || skus[0] || H.PRODUCTS[0].sku;
+        const cs = own.map((x) => x.cartons).sort((a, b) => a - b);
+        const fmax = Math.max.apply(null, own.filter((x) => x.sku === focus).map((x) => x.cartons).concat([0]));
+        const min = cs.length ? Math.min(cs[Math.floor(cs.length * 0.6)], fmax || cs[cs.length - 1]) : 20;
+        return { focus, min };
+      };
+      const PB = H.table([{ h: 'Region', k: 'region' }, { h: 'Focus SKU', k: 'focus' }, { h: 'Min cartons', k: 'min', num: true }, { h: 'Bonus rate', k: 'rate', num: true }],
+        H.REGIONS.map((reg) => {
+          const ru = reg === regs[0] || reg === regs[1] ? rule(reg, 0) : { focus: r.pick(H.PRODUCTS).sku, min: r.int(4, 9) * 5 };
+          return { region: reg, focus: ru.focus, min: ru.min, rate: r.pick([0.02, 0.025, 0.03, 0.04]) };
+        }));
+      const pb = H.ext('program_bonus.xlsx', 'Program', PB);
+      /* The hidden sheet: another region, whose focus SKU, minimum and bonus rate are revised, and one of its lines corrected.
+         The new rate differs from the visible region's, so a rate typed as a number fails. */
+      const hi = H.REGIONS.indexOf(regs[1]), nr = rule(regs[1], 1);
+      const rate0 = PB.cells[PB.cell('Bonus rate', H.REGIONS.indexOf(regs[0]))], rate1 = PB.cells[PB.cell('Bonus rate', hi)];
+      const newRate = [0.005, 0.01, -0.005].map((dx) => Math.round((rate1 + dx) * 1000) / 1000).find((x) => x !== rate0 && x !== rate1);
+      const pbAlt = H.edit(PB.cells, { [PB.cell('Focus SKU', hi)]: nr.focus, [PB.cell('Min cartons', hi)]: nr.min === rule(regs[1], 0).min ? nr.min + 1 : nr.min, [PB.cell('Bonus rate', hi)]: newRate });
+      const j = rows.findIndex((x) => x.region === regs[1] && x.sku === nr.focus);
+      const base = Object.assign({}, S.cells, { A1: 'Region', B1: regs[0], A2: 'Bonus pool (Rp)' });
+      const alt = H.edit(base, { B1: regs[1], [S.cell('Net (Rp)', j < 0 ? 0 : j)]: (x) => x + 1500000 });
+      const F = 'XLOOKUP(B1,' + pb.A('Region') + ',' + pb.A('Focus SKU') + ')', Mn = 'XLOOKUP(B1,' + pb.A('Region') + ',' + pb.A('Min cartons') + ')', R = 'XLOOKUP(B1,' + pb.A('Region') + ',' + pb.A('Bonus rate') + ')';
+      const vl = (i) => 'VLOOKUP(B1,' + pb.T('Region', 'Bonus rate') + ',' + i + ',FALSE)';
       return H.problem({
-        title: 'Count lines from CV distributors or of at least B1 cartons', file: 'penjualan_q4.xlsx', sheet: S, base, alt, answerCell: 'B2',
-        statement: '<p>In <b>B2</b>, count the lines that come from a distributor whose name starts with <b>CV</b> (' + b + ') <b>or</b> that have <b>at least</b> the cartons in B1 (' + c + '). A line that meets both counts once.</p>',
-        solution: '=COUNTIF(' + b + ',"CV*")+COUNTIF(' + c + ',">="&B1)-COUNTIFS(' + b + ',"CV*",' + c + ',">="&B1)',
-        alts: ['=COUNTIF(' + b + ',"CV*")+COUNTIFS(' + b + ',"<>CV*",' + c + ',">="&B1)', '=COUNTIFS(' + b + ',"CV*")+COUNTIFS(' + c + ',">="&B1,' + b + ',"<>CV*")'],
-        hints: ['Count each group, then take away the lines that are in both.', 'The overlap is a COUNTIFS with both conditions: "CV*" and ">="&B1.', 'Shape: =COUNTIF(' + b + ',"CV*")+COUNTIF(' + c + ',">="&B1)-COUNTIFS(' + b + ',"CV*",' + c + ',">="&B1).'],
-        explain: 'Adding the two counts counts the big CV lines twice, so the COUNTIFS of both conditions is taken away once. Another way: every CV line, plus the big lines that are not CV ("<>CV*").',
-        chips: [b, c, '"CV*"', '">="&B1'], fnKey: 'COUNTIFS('
+        title: 'Region bonus pool: focus SKU or big lines, rules in another file', file: 'penjualan_q4.xlsx', sheetName: 'Penjualan', sheet: S, base, alt, answerCell: 'B2',
+        books: [book('program_bonus.xlsx', 'Program', PB, pbAlt)],
+        statement: '<p>Two workbooks are open: your Q4 sales lines (<b>penjualan_q4.xlsx</b>) and the Q4 bonus program (<b>program_bonus.xlsx</b>: for each region a <b>Focus SKU</b>, a <b>Min cartons</b> and a <b>Bonus rate</b> as a decimal).</p><p>A line of the region in B1 earns the bonus when its <b>SKU</b> is the region\'s focus SKU <b>or</b> its <b>Cartons</b> are <b>at least</b> the region\'s Min cartons. In <b>B2</b>, work out the region\'s bonus pool: the Net of the lines that earn it, each counted once, times the region\'s bonus rate.</p>',
+        solution: '=(SUMIFS(' + n + ',' + q + ',B1,' + k + ',' + F + ')+SUMIFS(' + n + ',' + q + ',B1,' + k + ',"<>"&' + F + ',' + c + ',">="&' + Mn + '))*' + R,
+        alts: ['=(SUMIFS(' + n + ',' + q + ',B1,' + k + ',' + F + ')+SUMIFS(' + n + ',' + q + ',B1,' + c + ',">="&' + Mn + ')-SUMIFS(' + n + ',' + q + ',B1,' + k + ',' + F + ',' + c + ',">="&' + Mn + '))*' + R,
+          '=SUMPRODUCT((' + q + '=B1)*(((' + k + '=' + F + ')+(' + c + '>=' + Mn + '))>0)*' + n + ')*' + R,
+          '=LET(f,' + F + ',m,' + Mn + ',(SUMIFS(' + n + ',' + q + ',B1,' + k + ',f)+SUMIFS(' + n + ',' + q + ',B1,' + k + ',"<>"&f,' + c + ',">="&m))*' + R + ')',
+          '=(SUMIFS(' + n + ',' + q + ',B1,' + k + ',' + vl(2) + ')+SUMIFS(' + n + ',' + q + ',B1,' + k + ',"<>"&' + vl(2) + ',' + c + ',">="&' + vl(3) + '))*' + vl(4)],
+        hints: ['Three lookups in program_bonus.xlsx, all by the region in B1: the focus SKU, the minimum cartons and the bonus rate.',
+          'Split the OR so no line counts twice: the focus SKU lines, plus the lines that are not the focus SKU ("<>"&focus) but have at least the minimum (">="&min). Or add both groups and take away the lines in both.',
+          'Shape: =(SUMIFS(' + n + ',' + q + ',B1,' + k + ',focus)+SUMIFS(' + n + ',' + q + ',B1,' + k + ',"<>"&focus,' + c + ',">="&min))*rate.'],
+        explain: 'The lookups turn the region into its own rules, which become SUMIFS conditions. The focus SKU lines plus the big lines of other SKUs cover the OR without double counting, and the bonus rate turns that net into the pool. When the program changes the focus SKU, the minimum or the rate, the same formula follows it.',
+        chips: [n, q, k, c, pb.A('Region'), pb.A('Focus SKU'), pb.A('Min cartons'), pb.A('Bonus rate')], fnKey: 'SUMIFS('
       });
     }
   });
 
   P.add({
-    key: 'one-month-windows', difficulty: 'Hard', level: 8, topics: ['SUMIFS', 'EOMONTH', 'EDATE'], count: 3,
+    key: 'one-month-windows', difficulty: 'Hard', level: 8, topics: ['SUMIFS', 'EOMONTH', 'EDATE', 'XLOOKUP', 'Several workbooks'], count: 3, multi: true,
     make(r, v) {
-      const g = r.sample(H.REGIONS, 3);
-      const rows = lines(r, 18, (s) => g.includes(s.region));
-      const V = [
-        { title: 'Net growth of the region in B1 for the month in B2', k: 'region', h: 'Region', val: 'Net (Rp)', vk: 'net', cols: [COL.date, COL.region, COL.category, COL.net], label: 'Region' },
-        { title: 'Change in cartons of the distributor in B1 for the month in B2', k: 'distributor', h: 'Distributor', val: 'Cartons', vk: 'cartons', cols: [COL.date, COL.dist, COL.product, COL.cartons], label: 'Distributor' },
-        { title: 'Share of the category in B1 in the net of the month in B2', k: 'category', h: 'Category', val: 'Net (Rp)', vk: 'net', cols: [COL.date, COL.region, COL.category, COL.net], label: 'Category' }
-      ][v];
-      const S = H.table(V.cols, rows);
-      const d = S.R('Date'), K = S.R(V.h), s = S.R(V.val);
-      /* Pick key and month pairs where both the month and the month before have sales. */
-      const ok = [];
-      for (const key of ranked(rows, V.k)) for (const m of [11, 12]) {
-        const cur = sumOf(rows, (x) => x[V.k] === key && month(x.date) === m, V.vk);
-        const prev = sumOf(rows, (x) => x[V.k] === key && month(x.date) === m - 1, V.vk);
-        if (cur > 0 && (v === 2 || prev > 0) && (v !== 1 || cur !== prev)) ok.push({ key, m });
-      }
-      /* Prefer the pairs with the most lines in both months, so the windows hold real totals. */
-      const lineCount = (o) => Math.min(rows.filter((x) => x[V.k] === o.key && month(x.date) === o.m).length, rows.filter((x) => x[V.k] === o.key && month(x.date) === o.m - 1).length);
-      ok.sort((a, b) => lineCount(b) - lineCount(a));
-      while (ok.length < 2) ok.push({ key: ranked(rows, V.k)[ok.length], m: 12 - ok.length });
-      const two = ok.find((x) => x.key !== ok[0].key && x.m !== ok[0].m) || ok[1];
+      const MD = masterDist(), md = H.ext(MASTER, 'Distributor', MD);
       const first = (m) => H.toSerial('2026-' + m + '-01');
-      const base = Object.assign({}, S.cells, { A1: V.label, B1: ok[0].key, A2: 'Month (first day)', B2: first(ok[0].m), A3: v === 0 ? 'Growth' : v === 1 ? 'Change (cartons)' : 'Share' });
-      const j = rows.findIndex((x) => x[V.k] === two.key && month(x.date) === two.m);
-      const edits = { B1: two.key, B2: first(two.m), [S.cell(V.val, j)]: (x) => x + (V.vk === 'net' ? 1500000 : 5) };
-      /*
-       * The hidden sheet also moves some lines to the first and last day of their month (they stay in the same month),
-       * so a window that leaves out its first or last day, or lets the two months overlap, gives a different answer.
-       */
       const lastDay = (m) => (m === 12 ? H.toSerial('2027-01-01') : first(m + 1)) - 1;
-      const toEdges = (m, keep) => {
-        const own = where(rows, (x) => keep(x) && month(x.date) === m);
+      if (v === 0) {
+        /* The closing calendar: periods run from the 26th to the 25th. Net in the period over the region's target. */
+        const g = r.sample(H.REGIONS, 3);
+        const rows = lines(r, 22, (s) => g.includes(s.region));
+        const PER = ['Oct', 'Nov', 'Dec'], ps = r.shuffle(PER);
+        const regs = uniq(ranked(rows, 'region').concat(g));
+        const pm = (p) => 10 + PER.indexOf(p);
+        const day = (m, dd) => '2026-' + String(m).padStart(2, '0') + '-' + String(dd).padStart(2, '0');
+        /* Two lines of the visible region sit where the period and the calendar month disagree. */
+        const a = rows.findIndex((x) => x.region === regs[0] && month(x.date) === pm(ps[0]));
+        if (a >= 0) rows[a] = Object.assign({}, rows[a], { date: day(pm(ps[0]), 27) });
+        const b = rows.findIndex((x, i) => i !== a && x.region === regs[0] && month(x.date) === pm(ps[0]) - 1);
+        if (b >= 0) rows[b] = Object.assign({}, rows[b], { date: day(pm(ps[0]) - 1, 26) });
+        rows.sort(byDate);
+        const S = H.table([COL.date, COL.dist, COL.region, COL.net], rows);
+        const d = S.R('Date'), q = S.R('Region'), n = S.R('Net (Rp)');
+        const CAL = [['Oct', '2026-09-26', '2026-10-25'], ['Nov', '2026-10-26', '2026-11-25'], ['Dec', '2026-11-26', '2026-12-25']].map((x) => ({ p: x[0], s: x[1], e: x[2] }));
+        const KT = H.table([{ h: 'Period', k: 'p' }, { h: 'Start', k: 's', date: true }, { h: 'End', k: 'e', date: true }], CAL);
+        const inPer = (x, p) => { const c = CAL.find((y) => y.p === p); return x.date >= c.s && x.date <= c.e; };
+        const TG = H.table([{ h: 'Region', k: 'region' }].concat(PER.map((p) => ({ h: p, k: p, num: true }))), H.REGIONS.map((reg) => {
+          const o = { region: reg };
+          PER.forEach((p) => { const act = sumOf(rows, (x) => x.region === reg && inPer(x, p), 'net'); o[p] = act ? round5m(act * r.pick([0.85, 0.95, 1.05, 1.15, 1.25])) : r.int(2, 8) * 5000000; });
+          return o;
+        }));
+        const kt = H.ext('kalender_tutup.xlsx', 'Kalender', KT), tg = H.ext('target_region.xlsx', 'Target', TG);
+        const grid = tg.T('Oct', 'Dec'), tgHd = tg.prefix + '$B$4:$D$4', tgHdAll = tg.prefix + '$A$4:$D$4';
+        const base = Object.assign({}, S.cells, { A1: 'Region', B1: regs[0], A2: 'Period', B2: ps[0], A3: 'Achievement' });
+        /* The hidden sheet: another region and period, whose closing moves two days later; a line is booked on the new last day. */
+        const pi = PER.indexOf(ps[1]), m1 = pm(ps[1]);
+        const ktEdits = { [KT.cell('End', pi)]: H.toSerial(day(m1, 27)) };
+        if (pi < 2) ktEdits[KT.cell('Start', pi + 1)] = H.toSerial(day(m1, 28));
+        const ktAlt = H.edit(KT.cells, ktEdits);
+        const own = where(rows, (x) => x.region === regs[1] && month(x.date) === m1);
+        const edits = { B1: regs[1], B2: ps[1] };
+        if (own.length) edits[S.cell('Date', own[own.length - 1])] = H.toSerial(day(m1, 27));
+        if (own.length > 1) edits[S.cell('Net (Rp)', own[0])] = (x) => x + 1500000;
+        const alt = H.edit(base, edits);
+        /* The revised target never lands on the visible one, so a target typed as a number fails. */
+        const t0 = TG.cells[TG.cell(ps[0], H.REGIONS.indexOf(regs[0]))];
+        const tgAlt = H.edit(TG.cells, { [TG.cell(ps[1], H.REGIONS.indexOf(regs[1]))]: (x) => x + (x + 10000000 === t0 ? 15000000 : 10000000) });
+        const St ='XLOOKUP(B2,' + kt.A('Period') + ',' + kt.A('Start') + ')', En = 'XLOOKUP(B2,' + kt.A('Period') + ',' + kt.A('End') + ')';
+        const target = 'INDEX(' + grid + ',MATCH(B1,' + tg.A('Region') + ',0),MATCH(B2,' + tgHd + ',0))';
+        const net = 'SUMIFS(' + n + ',' + q + ',B1,' + d + ',">="&' + St + ',' + d + ',"<="&' + En + ')';
+        return H.problem({
+          title: 'Region net in a closing period against target, from three files', file: 'penjualan_q4.xlsx', sheetName: 'Penjualan', sheet: S, base, alt, answerCell: 'B3', precision: 4,
+          books: [book('kalender_tutup.xlsx', 'Kalender', KT, ktAlt), book('target_region.xlsx', 'Target', TG, tgAlt)],
+          statement: '<p>Three workbooks are open: your Q4 sales lines (<b>penjualan_q4.xlsx</b>), the closing calendar (<b>kalender_tutup.xlsx</b>: each period\'s Start and End date; a period usually runs from the 26th of one month to the 25th of the next, but the dates can move) and the period targets (<b>target_region.xlsx</b>, one row per region, one column per period).</p><p>In <b>B3</b>, work out the achievement of the region in B1 in the period named in B2: its Net from the period\'s Start to its End, both days included, divided by its target for that period. Leave it as a decimal.</p>',
+          solution: '=' + net + '/' + target,
+          alts: ['=SUMIFS(' + n + ',' + q + ',B1,' + d + ',">="&VLOOKUP(B2,' + kt.T('Period', 'End') + ',2,FALSE),' + d + ',"<="&VLOOKUP(B2,' + kt.T('Period', 'End') + ',3,FALSE))/VLOOKUP(B1,' + tg.T('Region', 'Dec') + ',MATCH(B2,' + tgHdAll + ',0),FALSE)',
+            '=' + net + '/XLOOKUP(B1,' + tg.A('Region') + ',XLOOKUP(B2,' + tgHd + ',' + grid + '))',
+            '=SUMPRODUCT((' + q + '=B1)*(' + d + '>=' + St + ')*(' + d + '<=' + En + ')*' + n + ')/' + target],
+          hints: ['The period is not the calendar month: look up its first and last day in kalender_tutup.xlsx with ' + St + ' and ' + En + '.',
+            'Those two dates become the date window of a SUMIFS (">="&start and "<="&end), next to the region condition. The target sits where the region\'s row meets the period\'s column: INDEX(' + grid + ', MATCH(B1, ...), MATCH(B2, ...)).',
+            'Shape: =SUMIFS(' + n + ',' + q + ',B1,' + d + ',">="&start,' + d + ',"<="&end)/' + target + '.'],
+          explain: 'The calendar lookups give the period\'s own Start and End, so SUMIFS adds the region\'s net between them. Lines dated after the 25th usually belong to the next period, which a calendar month window would get wrong. The target comes from the grid with INDEX and two MATCHes, and when the closing date moves, the same formula follows it.',
+          chips: [n, q, d, kt.A('Period'), kt.A('Start'), kt.A('End'), grid, tg.A('Region'), tgHd], fnKey: 'SUMIFS('
+        });
+      }
+      if (v === 1) {
+        /* A report filled down: each distributor's net in the month on the sales sheet, over its credit limit (kept by ID). */
+        const ds = r.sample(H.db().distributors, 8).sort((x, y) => (x.id < y.id ? -1 : 1));
+        const dn = ds.map((x) => x.name);
+        const sales = lines(r, 40, (s) => dn.includes(s.distributor));
+        const PJ = H.table([COL.date, COL.dist, COL.net], sales);
+        const S = H.table([COL.dist, COL.region], ds.map((x) => ({ distributor: x.name, region: x.region })));
+        const lkRows = r.shuffle(H.db().distributors).map((x) => ({ id: x.id, limit: r.pick([25, 30, 40, 50, 60, 75]) * 1000000 }));
+        const LK = H.table([{ h: 'ID', k: 'id' }, { h: 'Limit (Rp)', k: 'limit', num: true }], lkRows);
+        const pj = H.ext(null, 'Penjualan', PJ), lk = H.ext('limit_kredit.xlsx', 'Limit', LK);
+        const ms = r.shuffle([10, 11, 12]);
+        const base = Object.assign({}, S.cells, { A1: 'Month (first day)', B1: first(ms[0]) });
+        /* The hidden sheet: another month, two of its lines on its first and last day, one corrected, two limits revised. */
+        const m1 = ms[1], own = where(sales, (x) => month(x.date) === m1);
+        const pjEdits = {};
+        if (own.length) pjEdits[PJ.cell('Date', own[0])] = first(m1);
+        if (own.length > 1) pjEdits[PJ.cell('Date', own[own.length - 1])] = lastDay(m1);
+        if (own.length > 2) pjEdits[PJ.cell('Net (Rp)', own[1])] = (x) => x + 2000000;
+        const pjAlt = H.edit(PJ.cells, pjEdits);
+        const lkEdits = {};
+        uniq(own.map((i) => distOf(sales[i].distributor).id)).slice(0, 2).forEach((id, i) => { lkEdits[LK.cell('Limit (Rp)', lkRows.findIndex((x) => x.id === id))] = (x) => x + (i ? -5000000 : 10000000); });
+        const lkAlt = H.edit(LK.cells, lkEdits);
+        const alt = H.edit(base, { B1: first(m1) });
+        const idOf = 'XLOOKUP(A5,' + md.A('Distributor') + ',' + md.A('ID') + ')';
+        const lim = 'XLOOKUP(' + idOf + ',' + lk.A('ID') + ',' + lk.A('Limit (Rp)') + ')';
+        const N = pj.A('Net (Rp)'), B = pj.A('Distributor'), D = pj.A('Date');
+        const net = 'SUMIFS(' + N + ',' + B + ',A5,' + D + ',">="&$B$1,' + D + ',"<="&EOMONTH($B$1,0))';
+        return H.problem({
+          title: 'Credit use per distributor for the month in B1, limits kept by ID', file: 'laporan_kredit.xlsx', sheetName: 'Laporan', sheet: S, base, alt, fill: true, ansLabel: 'Credit use', precision: 4, dateCells: ['B1'],
+          sheets: [{ name: 'Penjualan', sheet: PJ, base: PJ.cells, alt: pjAlt }],
+          books: [{ file: MASTER, sheets: [{ name: 'Distributor', sheet: MD }] }, book('limit_kredit.xlsx', 'Limit', LK, lkAlt)],
+          statement: '<p>Three workbooks are open. Your report, <b>laporan_kredit.xlsx</b>, has two sheets: <b>Laporan</b>, the list you fill in, and <b>Penjualan</b>, the Q4 sales lines. Bu Lestari\'s credit limits are in <b>limit_kredit.xlsx</b>, listed by distributor ID, and <b>master_distributor.xlsx</b> gives each distributor\'s ID.</p><p>B1 holds the first day of a month. In <b>C5</b>, work out the distributor\'s credit use for that month: its Net on the Penjualan sheet from B1 to the last day of the month, divided by its credit limit. Fill it down to <b>C' + S.last + '</b>. Leave it as a decimal.</p>',
+          solution: '=' + net + '/' + lim,
+          alts: ['=SUMIFS(' + N + ',' + B + ',A5,' + D + ',">="&$B$1,' + D + ',"<"&EDATE($B$1,1))/' + lim,
+            '=' + net + '/VLOOKUP(INDEX(' + md.A('ID') + ',MATCH(A5,' + md.A('Distributor') + ',0)),' + lk.T('ID', 'Limit (Rp)') + ',2,FALSE)',
+            '=' + net + '/INDEX(' + lk.A('Limit (Rp)') + ',MATCH(' + idOf + ',' + lk.A('ID') + ',0))'],
+          hints: ['The net comes from the Penjualan sheet of this workbook: a SUMIFS on ' + N + ' for the distributor in A5 and the month that starts in B1. Pin $B$1 so it stays put while A5 moves down.',
+            'The limit file knows IDs, not names. First turn the name into an ID with ' + idOf + ' (VLOOKUP cannot return a column to the left of the one it searches), then look that ID up in limit_kredit.xlsx.',
+            'Shape: =SUMIFS(' + N + ',' + B + ',A5,' + D + ',">="&$B$1,' + D + ',"<="&EOMONTH($B$1,0))/XLOOKUP(ID of A5,' + lk.A('ID') + ',' + lk.A('Limit (Rp)') + ').'],
+          explain: 'On every row SUMIFS adds that distributor\'s net between B1 and EOMONTH($B$1,0) on the Penjualan sheet. The master turns the name into its ID and a second XLOOKUP brings the limit for that ID, so the report joins three sources. The ranges in other sheets and files are pinned, A5 is relative, so each row works out its own distributor.',
+          chips: [N, B, D, '">="&$B$1', '"<="&EOMONTH($B$1,0)', md.A('Distributor'), md.A('ID'), lk.A('ID'), lk.A('Limit (Rp)')], fnKey: 'SUMIFS('
+        });
+      }
+      /* v 2: the change in a distributor's freight bill from last month: cartons by month, the master, the rate card. */
+      const regs = r.sample(H.REGIONS, 4);
+      const dn = regs.map((g) => r.pick(H.db().distributors.filter((x) => x.region === g)).name);
+      const rows = lines(r, 20, (s) => dn.includes(s.distributor));
+      const S = H.table([COL.date, COL.dist, COL.product, COL.cartons], rows);
+      const d = S.R('Date'), b = S.R('Distributor'), c = S.R('Cartons');
+      /* Distributor and month pairs where both the month and the month before have cartons, and they differ. */
+      const ok = [];
+      for (const key of ranked(rows, 'distributor')) for (const m of [11, 12]) {
+        const cur = sumOf(rows, (x) => x.distributor === key && month(x.date) === m, 'cartons');
+        const prev = sumOf(rows, (x) => x.distributor === key && month(x.date) === m - 1, 'cartons');
+        if (cur > 0 && prev > 0 && cur !== prev) ok.push({ key, m });
+      }
+      const lineCount = (o) => Math.min(rows.filter((x) => x.distributor === o.key && month(x.date) === o.m).length, rows.filter((x) => x.distributor === o.key && month(x.date) === o.m - 1).length);
+      ok.sort((x, y) => lineCount(y) - lineCount(x));
+      const keys = ranked(rows, 'distributor');
+      if (!ok.length) ok.push({ key: keys[0], m: 12 });
+      const two = ok.find((x) => x.key !== ok[0].key && x.m !== ok[0].m) || ok.find((x) => x.key !== ok[0].key) || { key: keys.find((x) => x !== ok[0].key), m: ok[0].m === 12 ? 11 : 12 };
+      const FREIGHT = { Jabodetabek: 8000, 'Jawa Barat': 9500, 'Jawa Tengah': 11000, 'Jawa Timur': 12000, 'Bali Nusra': 16000, Sumatera: 18500, Sulawesi: 21000 };
+      const TK = H.table([{ h: 'Region', k: 'region' }, { h: 'Rate per carton (Rp)', k: 'rate', num: true }], H.REGIONS.map((g) => ({ region: g, rate: FREIGHT[g] + r.int(0, 4) * 250 })));
+      const tk = H.ext('tarif_kirim.xlsx', 'Tarif', TK);
+      const base = Object.assign({}, S.cells, { A1: 'Distributor ID', B1: distOf(ok[0].key).id, A2: 'Month (first day)', B2: first(ok[0].m), A3: 'Freight change (Rp)' });
+      /* The hidden sheet: another distributor and month, some of its lines on the first and last day, a new freight rate. */
+      const edits = { B1: distOf(two.key).id, B2: first(two.m) };
+      const toEdges = (m) => {
+        const own = where(rows, (x) => x.distributor === two.key && month(x.date) === m);
         if (own.length) edits[S.cell('Date', own[0])] = first(m);
         if (own.length > 1) edits[S.cell('Date', own[own.length - 1])] = lastDay(m);
         return own;
       };
-      const mine = toEdges(two.m, (x) => x[V.k] === two.key);
-      if (v !== 2) toEdges(two.m - 1, (x) => x[V.k] === two.key);
-      if (mine.length < 2) {
-        /* With one line in the month, the month's last line of another group is booked to B1 and dated on the last day. */
-        const o = where(rows, (x) => month(x.date) === two.m && x[V.k] !== two.key);
-        if (o.length) { edits[S.cell('Date', o[o.length - 1])] = lastDay(two.m); edits[S.cell(V.h, o[o.length - 1])] = two.key; }
-      }
+      const mine = toEdges(two.m);
+      toEdges(two.m - 1);
+      if (mine.length) edits[S.cell('Cartons', mine[0])] = (x) => x + 5;
       const alt = H.edit(base, edits);
-      const cur = 'SUMIFS(' + s + ',' + K + ',B1,' + d + ',">="&B2,' + d + ',"<="&EOMONTH(B2,0))';
-      const prev = 'SUMIFS(' + s + ',' + K + ',B1,' + d + ',">="&EDATE(B2,-1),' + d + ',"<"&B2)';
-      const cur2 = 'SUMIFS(' + s + ',' + K + ',B1,' + d + ',">="&B2,' + d + ',"<"&EDATE(B2,1))';
-      const prev2 = 'SUMIFS(' + s + ',' + K + ',B1,' + d + ',">"&EOMONTH(B2,-2),' + d + ',"<="&EOMONTH(B2,-1))';
-      const month0 = 'SUMIFS(' + s + ',' + d + ',">="&B2,' + d + ',"<="&EOMONTH(B2,0))';
-      const common = { file: 'penjualan_q4.xlsx', sheet: S, base, alt, answerCell: 'B3', dateCells: ['B2'], title: V.title };
-      if (v === 0) {
-        return H.problem(Object.assign(common, {
-          precision: 4,
-          statement: '<p>B2 holds the first day of a month. In <b>B3</b>, work out how much the <b>Net</b> of the region in B1 grew from the month before to the month in B2: this month\'s net divided by last month\'s net, minus 1, as a decimal (0.25 is 25% growth; the answer is negative when net fell). Keep the decimals.</p>',
-          solution: '=' + cur + '/' + prev + '-1',
-          alts: ['=' + cur2 + '/' + prev2 + '-1', '=(' + cur + '-' + prev + ')/' + prev],
-          hints: ['Each month is a date window: from B2 to EOMONTH(B2,0) for this month, and from EDATE(B2,-1) to the day before B2 for last month.', 'Write one SUMIFS per month, each with the region pair and two date pairs.', 'Shape: =SUMIFS(net,region,B1,date,">="&B2,date,"<="&EOMONTH(B2,0))/SUMIFS(net,region,B1,date,">="&EDATE(B2,-1),date,"<"&B2)-1.'],
-          explain: 'EDATE(B2,-1) is the first day of the month before and EOMONTH(B2,0) the last day of this month, so the two SUMIFS give the region\'s net in each window. New over old minus 1 is the growth rate.',
-          chips: [s, K, d, '">="&B2', '"<="&EOMONTH(B2,0)', '">="&EDATE(B2,-1)', '"<"&B2'], fnKey: 'SUMIFS('
-        }));
-      }
-      if (v === 1) {
-        return H.problem(Object.assign(common, {
-          statement: '<p>B2 holds the first day of a month. In <b>B3</b>, work out how many more <b>Cartons</b> the distributor in B1 bought in the month of B2 than in the month before it. The answer is negative when it bought fewer.</p>',
-          solution: '=' + cur + '-' + prev,
-          alts: ['=' + cur2 + '-' + prev2, '=-(' + prev + '-' + cur + ')'],
-          hints: ['Each month is a window of dates: this month runs from B2 to EOMONTH(B2,0).', 'Last month runs from EDATE(B2,-1) up to, but not including, B2.', 'Shape: =SUMIFS(cartons,distributor,B1,date,">="&B2,date,"<="&EOMONTH(B2,0))-SUMIFS(cartons,distributor,B1,date,">="&EDATE(B2,-1),date,"<"&B2).'],
-          explain: 'Two SUMIFS with the same distributor and different date windows give the cartons of each month, and their difference is the change. EDATE and EOMONTH keep the windows right for months of any length.',
-          chips: [s, K, d, '">="&B2', '"<="&EOMONTH(B2,0)', '">="&EDATE(B2,-1)', '"<"&B2'], fnKey: 'SUMIFS('
-        }));
-      }
-      return H.problem(Object.assign(common, {
-        precision: 4,
-        statement: '<p>B2 holds the first day of a month. In <b>B3</b>, work out what share of that month\'s <b>Net</b> comes from the category in B1: the category\'s net in the month divided by the net of every line in the same month, as a decimal.</p>',
-        solution: '=' + cur + '/' + month0,
-        alts: ['=' + cur2 + '/SUMIFS(' + s + ',' + d + ',">="&B2,' + d + ',"<"&EDATE(B2,1))', '=SUMPRODUCT((' + K + '=B1)*(' + d + '>=B2)*(' + d + '<=EOMONTH(B2,0))*' + s + ')/' + month0],
-        hints: ['The month window runs from B2 to EOMONTH(B2,0).', 'The top of the fraction has the category condition; the bottom has only the date window.', 'Shape: =SUMIFS(net,category,B1,date,">="&B2,date,"<="&EOMONTH(B2,0))/SUMIFS(net,date,">="&B2,date,"<="&EOMONTH(B2,0)).'],
-        explain: 'Both SUMIFS use the same month window, and only the top one also keeps the category in B1, so the ratio is the category\'s share of that month. A share always sits between 0 and 1.',
-        chips: [s, K, d, '">="&B2', '"<="&EOMONTH(B2,0)'], fnKey: 'SUMIFS('
-      }));
+      const tkAlt = H.edit(TK.cells, { [TK.cell('Rate per carton (Rp)', H.REGIONS.indexOf(distOf(two.key).region))]: (x) => x + 1500 });
+      const N = 'XLOOKUP(B1,' + md.A('ID') + ',' + md.A('Distributor') + ')';
+      const RT = 'XLOOKUP(XLOOKUP(B1,' + md.A('ID') + ',' + md.A('Region') + '),' + tk.A('Region') + ',' + tk.A('Rate per carton (Rp)') + ')';
+      const win = (who) => '(SUMIFS(' + c + ',' + b + ',' + who + ',' + d + ',">="&B2,' + d + ',"<="&EOMONTH(B2,0))-SUMIFS(' + c + ',' + b + ',' + who + ',' + d + ',">="&EDATE(B2,-1),' + d + ',"<"&B2))';
+      const mv = 'VLOOKUP(B1,' + md.T('ID', 'Region') + ',';
+      return H.problem({
+        title: 'Change in freight cost from last month for the distributor ID in B1', file: 'penjualan_q4.xlsx', sheetName: 'Penjualan', sheet: S, base, alt, answerCell: 'B3', dateCells: ['B2'],
+        books: [{ file: MASTER, sheets: [{ name: 'Distributor', sheet: MD }] }, book('tarif_kirim.xlsx', 'Tarif', TK, tkAlt)],
+        statement: '<p>Three workbooks are open: your Q4 sales lines (<b>penjualan_q4.xlsx</b>), the distributor master (<b>master_distributor.xlsx</b>: ID, name, city and region) and the freight rate card (<b>tarif_kirim.xlsx</b>: the cost of shipping one carton to each region).</p><p>B1 holds a distributor ID and B2 the first day of a month. In <b>B3</b>, work out how much that distributor\'s freight bill changed from the month before: its Cartons in the month of B2 minus its Cartons in the month before, times the rate per carton for the distributor\'s region. The answer is negative when the bill fell.</p>',
+        solution: '=' + win(N) + '*' + RT,
+        alts: ['=(SUMIFS(' + c + ',' + b + ',' + N + ',' + d + ',">="&B2,' + d + ',"<"&EDATE(B2,1))-SUMIFS(' + c + ',' + b + ',' + N + ',' + d + ',">"&EOMONTH(B2,-2),' + d + ',"<="&EOMONTH(B2,-1)))*' + RT,
+          '=LET(who,' + N + ',' + win('who') + '*' + RT + ')',
+          '=' + win(mv + '2,FALSE)') + '*VLOOKUP(' + mv + '4,FALSE),' + tk.T('Region', 'Rate per carton (Rp)') + ',2,FALSE)'],
+        hints: ['Your sheet has names and no regions. From the master take the name (' + N + ') for SUMIFS and the region for the rate card.',
+          'Each month is a date window: this month runs from B2 to EOMONTH(B2,0), last month from EDATE(B2,-1) up to the day before B2. The rate is a lookup of a lookup: XLOOKUP(region from the master,' + tk.A('Region') + ',' + tk.A('Rate per carton (Rp)') + ').',
+          'Shape: =(SUMIFS(cartons,distributor,name,date,">="&B2,date,"<="&EOMONTH(B2,0))-SUMIFS(cartons,distributor,name,date,">="&EDATE(B2,-1),date,"<"&B2))*rate.'],
+        explain: 'The master turns the ID into the name for both SUMIFS and into the region for the rate card. The two SUMIFS give the cartons of each month, their difference is the change, and the rate per carton turns it into rupiah. When the rate card changes, the answer follows it.',
+        chips: [c, b, d, md.A('ID'), md.A('Distributor'), md.A('Region'), tk.A('Region'), tk.A('Rate per carton (Rp)'), '">="&EDATE(B2,-1)', '"<="&EOMONTH(B2,0)'], fnKey: 'SUMIFS('
+      });
     }
   });
 });

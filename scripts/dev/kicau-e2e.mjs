@@ -353,7 +353,8 @@ const inView = async (p, sel, name) => {
   await until(p, `!document.querySelector('.typingb') && !!document.querySelector('#fx')`);
   /* Drag across cells to make a range, as with a mouse in Excel. */
   await p.ev(`window.__kicau.setFormula('=SUMIFS(')`);
-  const fit = await p.ev(`(() => { const g = document.getElementById('gw'); return { table: g.querySelector('table').offsetWidth, room: g.clientWidth }; })()`);
+  /* The data columns fit; the empty Excel columns after them may run past the edge. */
+  const fit = await p.ev(`(() => { const g = document.getElementById('gw'), t = g.querySelector('table'); const ths = [...t.tHead.rows[0].cells].filter((c) => !c.classList.contains('pad')); const last = ths[ths.length - 1]; return { table: last.offsetLeft + last.offsetWidth, room: g.clientWidth }; })()`);
   ok(fit.table <= fit.room + 1, 'all five columns fit the laptop workbook', fit);
   const a = await p.ev(`(() => { const r = document.querySelector('#gw td[data-ref="E5"]').getBoundingClientRect(); return { x: r.left + 10, y: r.top + 10 }; })()`);
   const z = await p.ev(`(() => { const e = document.querySelector('#gw td[data-ref="E12"]'); const r = e.getBoundingClientRect(); return { x: r.left + 10, y: r.top + 10 }; })()`);
@@ -527,6 +528,50 @@ for (const [N, w, h, mobile] of [['practice laptop', 1366, 768, false], ['practi
   ok(await p.ev(`document.getElementById('pq').value`) === 'VLOOKUP', `${N}: the list keeps your search when you come back`);
   await p.ev(`(() => { const q = document.getElementById('pq'); q.value = ''; q.dispatchEvent(new Event('input')); })()`);
   ok(await until(p, `document.querySelectorAll('#plist .pr-row.done').length === 3`), `${N}: the list ticks the solved ones`);
+  ok(p.errors.length === 0, `${N}: no console errors`, p.errors);
+}
+
+/* ---------- 3e. The sheet fills its panel like Excel, cards fold out visibly, practice across workbooks ---------- */
+{
+  const N = 'fill';
+  const p = await b.page();
+  await p.viewport(1366, 768, { mobile: false, dpr: 1 });
+  await openK(p, '/index.html?fast&reset');
+  await p.ev(`(() => { const i = document.getElementById('wname'); i.value = 'Rani'; i.dispatchEvent(new Event('input')); })()`);
+  await tap(p, '#go');
+  await ready(p);
+  await p.ev(`location.hash = '#chat-tika'`);
+  ok(await until(p, `!!document.getElementById('fx') && !document.querySelector('.typingb')`), `${N}: request 1.1 opens`);
+  const fit = async (label) => {
+    await sleep(250);
+    const r = await p.ev(`(() => { const gw = document.getElementById('gw'), t = gw.querySelector('table'); return { gw: gw.clientWidth, gh: gw.clientHeight, tw: t.offsetWidth, th: t.offsetHeight, pads: t.querySelectorAll('th.pad').length }; })()`);
+    ok(r.tw >= r.gw - 2 && r.th >= r.gh - 2, `${N}: ${label}: the sheet fills its panel`, r);
+    return r;
+  };
+  const a = await fit('beside the chat');
+  await tap(p, '#dockmax');
+  const z = await fit('maximized');
+  ok(z.pads > a.pads, `${N}: maximizing adds empty columns, as Excel shows more of the sheet`, [a.pads, z.pads]);
+  await tap(p, '#dockmax');
+  const chev = await p.ev(`getComputedStyle(document.querySelector('.lesson details summary'), '::after').content`);
+  ok(chev && chev !== 'none', `${N}: the lesson's fold-out shows an arrow`, chev);
+  /* Practice across workbooks: the first problem that opens three or more workbooks. */
+  await p.ev(`location.hash = '#practice'`);
+  ok(await until(p, `document.querySelectorAll('#plist .pr-row').length === 500`, 15000), `${N}: Practice lists 500`);
+  const n = await p.ev(`(async () => { const P = await window.__kicau.loadPractice(); const L = P.list(); for (const x of L) { const m = P.get(x.id); if (m.books && m.books.length >= 3) return x.n; } return 0; })()`);
+  ok(n > 0, `${N}: some practice problems use three or more workbooks`, n);
+  await p.ev(`location.hash = '#p-${n}'`);
+  ok(await until(p, `!!document.getElementById('fx') && window.__kicau.UI.prac && window.__kicau.UI.prac.n === ${n}`), `${N}: problem ${n} opens`);
+  ok(await p.ev(`document.querySelectorAll('#bktabs .bk').length`) >= 3, `${N}: problem ${n} shows a tab per workbook`);
+  await p.ev(`window.__kicau.setFormula('=')`);
+  await tap(p, '#bktabs [data-book="1"]');
+  await tap(p, '#gw button[data-col="A"]');
+  ok(/^=\[[a-z0-9_]+\.xlsx\][A-Za-z]+!\$A\$\d+:\$A\$\d+$/.test(await p.ev(`document.getElementById('fx').value`)), `${N}: a column in another workbook is written as Excel writes it`, await p.ev(`document.getElementById('fx').value`));
+  await tap(p, '#bktabs [data-book="0"]');
+  await p.ev(`window.__kicau.setFormula(window.__kicau.UI.prac.solution)`);
+  await p.ev(`document.getElementById('send').click()`);
+  ok(await until(p, `!!document.querySelector('#pres .verdict.ok')`), `${N}: problem ${n} accepts its solution across workbooks`);
+  await p.shot('practice-multibook');
   ok(p.errors.length === 0, `${N}: no console errors`, p.errors);
 }
 

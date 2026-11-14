@@ -123,6 +123,8 @@ ok(Check.judge(mission, '=SUMIFS(BAD)', run).state === 'error', 'an error value 
 ok(Check.judge(mission, '=', run).state === 'empty', 'an empty bar is noticed');
 ok(Check.explain('=SUMIFZ(E,B,B1)', '#NAME?').fix.formula === '=SUMIFS(E,B,B1)', 'a typo gets a one-tap fix');
 ok(Check.normalize('=IF(A1="a;b";1;2)') === '=IF(A1="a;b",1,2)', 'semicolons inside text stay');
+ok(Check.explain('=IF(OR(F5>30,E5/D5>0.9),"Review","OK")', '#VALUE!').title === 'Something here is not a number', 'a #VALUE! in IF is explained as text where a number belongs');
+ok(Check.explain('=SUMIFS(E5:E20,B5:B24,B1)', '#VALUE!').title === 'The ranges do not line up', 'a #VALUE! in SUMIFS is explained as ranges of different sizes');
 
 /* ---------- Copy rules from the SQL lab's docs/AUTHORING.md ---------- */
 const copyFiles = ['assets/js/core/check.js', 'index.html', 'README.md'];

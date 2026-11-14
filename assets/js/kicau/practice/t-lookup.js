@@ -57,8 +57,31 @@
     return Object.keys(tot).sort().map((d) => ({ d, region: DIST().find((x) => x.name === d).region, lines: cnt[d], net: tot[d] }));
   }
 
-  /* ======================= Easy: one exact lookup ======================= */
+  /* ---------- other workbooks ----------
+     Real reports pull from several files: the learner's own lines sit in the main workbook, and the masters, rates,
+     targets, limits and schedules sit in others. A formula looks things up there first, then does the math. wb() is
+     one other workbook with one sheet, as shown and as changed on the hidden test. */
+  const X = H.ext;
+  const wb = (file, name, S, alt) => ({ file, sheets: [{ name, sheet: S, base: S.cells, alt: alt || S.cells }] });
+  const COUNT = ['', 'One', 'Two', 'Three', 'Four'];
+  /* "Three workbooks are open: a (x.xlsx), b (y.xlsx) and c (z.xlsx)." from [[what, file], ...]. */
+  const opens = (list) => { const p = list.map(([d, f]) => d + ' (<b>' + f + '</b>)'); return COUNT[list.length] + ' workbooks are open: ' + p.slice(0, -1).join(', ') + ' and ' + p[p.length - 1] + '.'; };
+  /* The ranges of a grid in another workbook (made by across(), or laid out the same way): the values, the row keys
+     down column A, the column keys across row 4, and the same with column A and row 4 included, for VLOOKUP. */
+  function gridRefs(file, name, G) {
+    const p = X(file, name, G).prefix, lc = G.cols[G.cols.length - 1], lr = G.last;
+    return { p, G: p + '$B$5:$' + lc + '$' + lr, RK: p + '$A$5:$A$' + lr, CK: p + '$B$4:$' + lc + '$4', ALL: p + '$A$5:$' + lc + '$' + lr, HEAD: p + '$A$4:$' + lc + '$4' };
+  }
+  /* Columns of the distributor master, a workbook many of these reports look things up in. */
+  const DC = { id: { h: 'ID', k: 'id' }, name: { h: 'Distributor', k: 'name' }, city: { h: 'City', k: 'city' }, region: { h: 'Region', k: 'region' },
+    terms: { h: 'Terms (days)', k: 'terms_days', num: true }, disc: { h: 'Discount (%)', k: 'tier_discount', num: true } };
+  const regionOf = (name) => DIST().find((d) => d.name === name).region;
+  /* The index of the tier a value falls in, for lower limits sorted smallest first. */
+  const tierAt = (lows, x) => { let k = 0; lows.forEach((lo, m) => { if (x >= lo) k = m; }); return k; };
+  /* Start dates for a schedule: 1 September, then the dates of the given order rows, always rising. */
+  const startDates = (rs, at) => { let prev = H.toSerial('2026-09-01'); return [prev].concat(at.map((k) => (prev = Math.max(rs[k], prev + 1)))); };
 
+  /* ======================= Easy: one exact lookup ======================= */
   P.add({
     key: 'vlookup-one-value', difficulty: 'Easy', level: 2, topics: ['VLOOKUP', 'XLOOKUP'], count: 5,
     make(r, v) {
@@ -106,7 +129,6 @@
       });
     }
   });
-
   P.add({
     key: 'xlookup-one-label', difficulty: 'Easy', level: 3, topics: ['XLOOKUP', 'VLOOKUP'], count: 5,
     make(r, v) {
@@ -154,53 +176,56 @@
   });
 
   /* ======================= Medium ======================= */
-
   P.add({
-    key: 'price-times-quantity', difficulty: 'Medium', level: 4, topics: ['XLOOKUP', 'VLOOKUP'], count: 4,
+    key: 'price-times-quantity', difficulty: 'Medium', level: 4, topics: ['XLOOKUP', 'VLOOKUP', 'Several workbooks'], count: 4, multi: true,
     make(r, v) {
-      /* The main list in A to D (the code in C, the quantity in D), a rate list in G and H; the answer fills column E. */
+      /* The lines are in the learner's own file (the code in C, the quantity in D); the rate list is another workbook.
+         One lookup into it, times the quantity, fills column E. */
       const V = [
-        { title: 'Line value from a carton price list', file: 'pesanan_q4.xlsx', who: 'Tika', ans: 'Value (Rp)',
+        { title: 'Line value with carton prices from another workbook', file: 'pesanan_q4.xlsx', sheetName: 'Pesanan', mine: 'the order lines', who: 'Tika', ans: 'Value (Rp)',
           main: [{ h: 'Date', k: 'date', date: true }, { h: 'Distributor', k: 'distributor' }, { h: 'SKU', k: 'sku' }, { h: 'Cartons', k: 'cartons', num: true }], rows: () => H.sales(r, 14),
-          side: [{ h: 'SKU', k: 'sku' }, { h: 'Carton price (Rp)', k: 'carton_price', num: true }], list: () => r.shuffle(H.PRODUCTS), step: 6000, qstep: 5,
-          task: 'multiply the line\'s <b>Cartons</b> by the carton price of its <b>SKU</b>' },
-        { title: 'Packs shipped from a packs-per-carton list', file: 'pengiriman_q4.xlsx', who: 'Pak Anton', ans: 'Packs',
+          book: 'daftar_harga.xlsx', bsheet: 'Harga', bdesc: 'the price list',
+          side: [{ h: 'SKU', k: 'sku' }, { h: 'Product', k: 'name' }, { h: 'Carton price (Rp)', k: 'carton_price', num: true }], list: () => r.shuffle(H.PRODUCTS), step: 6000, qstep: 5,
+          task: 'multiply the line\'s <b>Cartons</b> by the <b>Carton price (Rp)</b> of its <b>SKU</b> in the price list' },
+        { title: 'Packs shipped, with pack sizes from the product master', file: 'pengiriman_q4.xlsx', sheetName: 'Kirim', mine: 'the shipments', who: 'Pak Anton', ans: 'Packs',
           main: [{ h: 'Date', k: 'date', date: true }, { h: 'Invoice', k: 'invoice' }, { h: 'SKU', k: 'sku' }, { h: 'Cartons', k: 'cartons', num: true }], rows: () => H.sales(r, 14),
-          side: [{ h: 'SKU', k: 'sku' }, { h: 'Packs per carton', k: 'packs_per_carton', num: true }], list: () => r.shuffle(H.PRODUCTS), step: 8, qstep: 4,
-          task: 'turn the line\'s <b>Cartons</b> into packs with the packs per carton of its <b>SKU</b>' },
-        { title: 'Stock value from a cost-per-carton list', file: 'stok_gudang.xlsx', who: 'Bu Lestari', ans: 'Stock value (Rp)',
+          book: 'master_produk.xlsx', bsheet: 'Produk', bdesc: 'the product master',
+          side: [{ h: 'SKU', k: 'sku' }, { h: 'Product', k: 'name' }, { h: 'Category', k: 'category' }, { h: 'Packs per carton', k: 'packs_per_carton', num: true }], list: () => r.shuffle(H.PRODUCTS), step: 8, qstep: 4,
+          task: 'turn the line\'s <b>Cartons</b> into packs with the <b>Packs per carton</b> of its <b>SKU</b> in the product master' },
+        { title: 'Stock value at cost, with costs kept in another workbook', file: 'stok_gudang.xlsx', sheetName: 'Stok', mine: 'the stock count', who: 'Bu Lestari', ans: 'Stock value (Rp)',
           main: [{ h: 'Warehouse', k: 'warehouse' }, { h: 'Product', k: 'product' }, { h: 'SKU', k: 'sku' }, { h: 'On hand', k: 'onhand', num: true }], rows: () => r.shuffle(H.stock(r, 12)),
-          side: [{ h: 'SKU', k: 'sku' }, { h: 'Cost per carton (Rp)', k: 'cost', num: true }], list: () => r.shuffle(H.PRODUCTS).map((p) => ({ sku: p.sku, cost: Math.round(p.carton_price * 0.72 / 100) * 100 })), step: 2500, qstep: 20,
-          task: 'multiply the cartons <b>On hand</b> by the cost per carton of its <b>SKU</b>' },
-        { title: 'Monthly interest from a loan-type rate table', file: 'buku_pinjaman.xlsx', who: 'Dimas', ans: 'Interest (Rp)', round: true,
+          book: 'biaya_produk.xlsx', bsheet: 'Biaya', bdesc: 'the cost file',
+          side: [{ h: 'SKU', k: 'sku' }, { h: 'Product', k: 'name' }, { h: 'Cost per carton (Rp)', k: 'cost', num: true }],
+          list: () => r.shuffle(H.PRODUCTS).map((p) => ({ sku: p.sku, name: p.name, cost: Math.round(p.carton_price * 0.72 / 100) * 100 })), step: 2500, qstep: 20,
+          task: 'multiply the cartons <b>On hand</b> by the <b>Cost per carton (Rp)</b> of its <b>SKU</b> in the cost file' },
+        { title: 'Monthly interest with rates from the bank rate card', file: 'buku_pinjaman.xlsx', sheetName: 'Pinjaman', mine: 'the loan book', who: 'Dimas', ans: 'Interest (Rp)', round: true,
           main: [{ h: 'Facility', k: 'facility' }, { h: 'Distributor', k: 'distributor' }, { h: 'Type', k: 'type' }, { h: 'Outstanding (Rp)', k: 'outstanding', num: true }], rows: () => H.loans(r, 14),
+          book: 'suku_bunga.xlsx', bsheet: 'Bunga', bdesc: 'the rate card',
           side: [{ h: 'Type', k: 'type' }, { h: 'Rate (% a year)', k: 'rate', num: true }],
           list: () => [{ type: 'Working Capital', rate: r.pick([10, 10.5, 11]) }, { type: 'Term Loan', rate: r.pick([11.5, 12, 12.5]) }, { type: 'Trade Finance', rate: r.pick([9, 9.5]) }], step: 0.5, qstep: 2000000,
-          task: 'work out one month of interest: the <b>Outstanding</b> balance times the yearly rate of its loan <b>Type</b>, divided by 100 and by 12, rounded to whole rupiah with ROUND' }
+          task: 'work out one month of interest: the <b>Outstanding (Rp)</b> balance times the yearly rate of its loan <b>Type</b> in the rate card, divided by 100 and by 12, rounded to whole rupiah with ROUND' }
       ][v];
       const rows = V.rows(), list = V.list();
-      const S = H.table(V.main, rows), M = H.table(V.side, list, { startCol: 6 });
-      const B = board([S, M]);
-      const kH = V.main[2].h, qH = V.main[3].h, sk = V.side[0], sv = V.side[1];
+      const S = H.table(V.main, rows), M = H.table(V.side, list);
+      const ex = X(V.book, V.bsheet, M);
+      const kH = V.main[2].h, qH = V.main[3].h, sk = V.side[0], sv = V.side[V.side.length - 1];
       const key0 = rows[0][V.main[2].k];
-      const base = B.cells;
-      /* The hidden sheet: one rate in the list is updated and one quantity is corrected. */
-      const alt = H.edit(base, {
-        [M.cell(sv.h, list.findIndex((x) => x[sk.k] === key0))]: (x) => Math.round((x + V.step) * 100) / 100,
-        [S.cell(qH, 5)]: (x) => x + V.qstep
-      });
-      const KA = M.A(sk.h), VA = M.A(sv.h), TA = M.T(sk.h, sv.h);
-      const xl = 'XLOOKUP(C5,' + KA + ',' + VA + ')', vl = 'VLOOKUP(C5,' + TA + ',2,FALSE)', im = 'INDEX(' + VA + ',MATCH(C5,' + KA + ',0))';
+      /* The hidden test: the other workbook updates the rate of row 5's code, and one quantity is corrected. */
+      const mAlt = H.edit(M.cells, { [M.cell(sv.h, list.findIndex((x) => x[sk.k] === key0))]: (x) => Math.round((x + V.step) * 100) / 100 });
+      const alt = H.edit(S.cells, { [S.cell(qH, 5)]: (x) => x + V.qstep });
+      const KA = ex.A(sk.h), VA = ex.A(sv.h), TA = ex.T(sk.h, sv.h);
+      const xl = 'XLOOKUP(C5,' + KA + ',' + VA + ')', vl = 'VLOOKUP(C5,' + TA + ',' + V.side.length + ',FALSE)', im = 'INDEX(' + VA + ',MATCH(C5,' + KA + ',0))';
       const wrap = (x) => (V.round ? '=ROUND(D5*' + x + '/100/12,0)' : '=D5*' + x);
-      return build(B, {
-        title: V.title, file: V.file, base, alt, fill: true, fillCol: 'E', ansLabel: V.ans,
-        statement: `<p>${V.who} needs the <b>${V.ans}</b> of every row. Using the list in <b>G5:H${M.last}</b>, in <b>E5</b> ${V.task}. Then fill it down to <b>E${S.last}</b>.</p>`,
+      return H.problem({
+        title: V.title, file: V.file, sheetName: V.sheetName, sheet: S, base: S.cells, alt, fill: true, fillCol: 'E', ansLabel: V.ans,
+        books: [wb(V.book, V.bsheet, M, mAlt)],
+        statement: `<p>${opens([[V.mine, V.file], [V.bdesc, V.book]])} ${V.who} needs the <b>${V.ans}</b> of every row. In <b>E5</b>, ${V.task}. Then fill it down to <b>E${S.last}</b>.</p>`,
         solution: wrap(xl),
         alts: [wrap(vl), wrap(im), V.round ? '=ROUND(D5*' + vl + '/1200,0)' : '=' + xl + '*D5'],
-        hints: [`Look up the ${kH} in C5 in the list in G and H, then work with ${qH} in D5.`,
-          `Pin the list with $ so it stays put as you fill down: ${KA} and ${VA}.`,
+        hints: [`Look up the ${kH} in C5 in ${V.book}, then work with the ${qH} in D5.`,
+          `Open the ${V.book} tab and tap a column: Kicau writes it as Excel does, pinned with $, such as ${KA}.`,
           `Shape: ${wrap('XLOOKUP(C5, ' + KA + ', ' + VA + ')')}`],
-        explain: `XLOOKUP finds the ${kH} from C5 in ${KA} and returns the ${sv.h} beside it. ${V.round ? 'Times D5, divided by 100 and by 12 and rounded, that is one month of interest.' : 'Times D5 that gives the row\'s ' + V.ans + '.'} The $ signs keep the list fixed while the formula fills down.`,
+        explain: `XLOOKUP finds the ${kH} from C5 in ${KA}, in the other workbook, and returns the ${sv.h} on the same row. ${V.round ? 'Times D5, divided by 100 and by 12 and rounded, that is one month of interest.' : 'Times D5 that gives the row\'s ' + V.ans + '.'} The ranges in ${V.book} are pinned with $, as Excel writes them, so filling down keeps them in place.`,
         chips: ['D5*', 'C5', KA, VA, TA, ',FALSE)'], fnKey: 'XLOOKUP('
       });
     }
@@ -249,7 +274,6 @@
       });
     }
   });
-
   P.add({
     key: 'position-with-match', difficulty: 'Medium', level: 4, topics: ['MATCH', 'XMATCH'], count: 3,
     make(r, v) {
@@ -315,7 +339,6 @@
       });
     }
   });
-
   P.add({
     key: 'lookup-to-the-left', difficulty: 'Medium', level: 5, topics: ['XLOOKUP', 'INDEX', 'MATCH'], count: 4,
     make(r, v) {
@@ -355,7 +378,6 @@
       });
     }
   });
-
   P.add({
     key: 'hlookup-across-months', difficulty: 'Medium', level: 5, topics: ['HLOOKUP', 'XLOOKUP'], count: 4,
     make(r, v) {
@@ -426,81 +448,105 @@
       });
     }
   });
-
   P.add({
-    key: 'lookup-with-a-fallback', difficulty: 'Medium', level: 5, topics: ['XLOOKUP', 'IFERROR', 'IFNA'], count: 4,
+    key: 'lookup-with-a-fallback', difficulty: 'Medium', level: 5, topics: ['XLOOKUP', 'IFERROR', 'IFNA', 'Several workbooks'], count: 4, multi: true,
     make(r, v) {
-      /* Some keys are missing from the side list; the answer shows a fallback instead of #N/A. */
-      let S, M, rows, list, e = {}, spec;
+      /* Some keys are missing from the list in the other workbook. The lookup falls back to a value instead of #N/A,
+         and the math runs on whatever comes back. */
+      let p;
       if (v === 0) {
-        const prods = r.shuffle(H.PRODUCTS), missing = prods.slice(10);
-        list = prods.slice(0, 10);
-        rows = H.sales(r, 14); rows[2].sku = missing[0].sku; rows[8].sku = missing[1].sku;
-        S = H.table([{ h: 'Date', k: 'date', date: true }, { h: 'Distributor', k: 'distributor' }, { h: 'SKU', k: 'sku' }, { h: 'Cartons', k: 'cartons', num: true }], rows);
-        M = H.table([{ h: 'SKU', k: 'sku' }, { h: 'Carton price (Rp)', k: 'carton_price', num: true }], list, { startCol: 6 });
-        const listed = (k) => list.findIndex((p) => p.sku === rows[k].sku);
-        const k0 = nums(14).find((k) => listed(k) >= 0);
-        e[M.cell('Carton price (Rp)', listed(k0))] = (x) => x + 5000;
-        const k4 = [4, 5, 6].find((k) => listed(k) >= 0);
-        e[S.cell('SKU', k4)] = missing[1].sku;
-        spec = { title: 'Carton price per line, or 0 when the SKU is not listed', file: 'pesanan_q4.xlsx', key: 'C5', keyName: 'SKU', ans: 'List price (Rp)', fb: '0',
-          what: 'the carton price of the line\'s <b>SKU</b>', why: 'Two new SKUs are not on the price list yet.', fbText: '<b>0</b>' };
+        const prods = r.shuffle(H.PRODUCTS), missing = prods.slice(10), list = prods.slice(0, 10);
+        const rows = H.sales(r, 14); rows[2].sku = missing[0].sku; rows[8].sku = missing[1].sku;
+        const S = H.table([{ h: 'Date', k: 'date', date: true }, { h: 'Distributor', k: 'distributor' }, { h: 'SKU', k: 'sku' }, { h: 'Cartons', k: 'cartons', num: true }], rows);
+        const M = H.table([{ h: 'SKU', k: 'sku' }, { h: 'Product', k: 'name' }, { h: 'Carton price (Rp)', k: 'carton_price', num: true }], list);
+        const ex = X('daftar_harga.xlsx', 'Harga', M);
+        const listed = (k) => list.findIndex((x) => x.sku === rows[k].sku);
+        const k0 = nums(14).find((k) => listed(k) >= 0), k4 = [4, 5, 6].find((k) => listed(k) >= 0);
+        /* The hidden test: the price list updates one price, and one more line turns out to be a new SKU. */
+        const mAlt = H.edit(M.cells, { [M.cell('Carton price (Rp)', listed(k0))]: (x) => x + 5000 });
+        const alt = H.edit(S.cells, k4 === undefined ? {} : { [S.cell('SKU', k4)]: missing[1].sku });
+        const KA = ex.A('SKU'), VA = ex.A('Carton price (Rp)'), TA = ex.T('SKU', 'Carton price (Rp)');
+        p = { title: 'Order value from another price list, 0 for unlisted SKUs', file: 'pesanan_q4.xlsx', sheetName: 'Pesanan', S, alt, books: [wb('daftar_harga.xlsx', 'Harga', M, mAlt)], ans: 'Value (Rp)', KA, VA,
+          statement: `<p>${opens([['the order lines', 'pesanan_q4.xlsx'], ['the price list', 'daftar_harga.xlsx']])} Two of the SKUs ordered are not on this price list yet.</p><p>In <b>E5</b>, work out each line's <b>Value (Rp)</b>: its <b>Cartons</b> times the <b>Carton price (Rp)</b> of its SKU in the price list. When the SKU is not on the list, the value is <b>0</b> instead of #N/A. Fill it down to <b>E${S.last}</b>.</p>`,
+          solution: `=D5*XLOOKUP(C5,${KA},${VA},0)`,
+          alts: [`=D5*IFERROR(VLOOKUP(C5,${TA},3,FALSE),0)`, `=IFNA(D5*INDEX(${VA},MATCH(C5,${KA},0)),0)`, `=D5*IFNA(VLOOKUP(C5,${TA},3,FALSE),0)`],
+          fb: '0', shape: `=D5*XLOOKUP(C5, ${KA}, ${VA}, 0)`, chips: ['D5*', 'C5', KA, VA, TA, ',0)'],
+          explain: `XLOOKUP's fourth part, if_not_found, is returned when C5 is not in ${KA}, so an unlisted SKU gives 0 and the line's value is 0. IFERROR or IFNA around VLOOKUP gives the same result.` };
       } else if (v === 1) {
-        const ds = DIST().slice(), fac = WC();
-        const drop = r.sample(nums(14), 4);
-        list = r.shuffle(fac.filter((f, k) => !drop.includes(k)));
-        rows = ds;
-        S = H.table([{ h: 'ID', k: 'id' }, { h: 'Distributor', k: 'name' }, { h: 'City', k: 'city' }, { h: 'Region', k: 'region' }], rows);
-        M = H.table([{ h: 'Distributor', k: 'distributor' }, { h: 'Limit (Rp)', k: 'limit', num: true }], list, { startCol: 6 });
-        e[M.cell('Distributor', 0)] = ds[drop[0]].name;
-        e[M.cell('Limit (Rp)', 1)] = (x) => x + 50000000;
-        spec = { title: 'Credit limit per distributor, or No facility', file: 'limit_kredit.xlsx', key: 'B5', keyName: 'Distributor', ans: 'Limit (Rp)', fb: '"No facility"',
-          what: 'the distributor\'s <b>Limit (Rp)</b> at Bank Kenari', why: 'Not every distributor has a facility.', fbText: 'the words <b>No facility</b>' };
+        const fac = WC();
+        const drop = r.sample(nums(fac.length), 4);
+        const list = r.shuffle(fac.filter((f, k) => !drop.includes(k))).map((f) => ({ d: f.distributor, fac: f.facility_id, avail: Math.max(5000000, f.limit - f.outstanding) }));
+        const rows = r.shuffle(DIST()).map((d) => {
+          const l = list.find((x) => x.d === d.name);
+          return { id: d.id, name: d.name, city: d.city, order: l ? Math.max(5, Math.round(l.avail * r.pick([0.5, 0.8, 1.25, 1.6]) / 1000000)) * 1000000 : r.int(10, 80) * 1000000 };
+        });
+        const S = H.table([{ h: 'ID', k: 'id' }, { h: 'Distributor', k: 'name' }, { h: 'City', k: 'city' }, { h: 'Order (Rp)', k: 'order', num: true }], rows);
+        const M = H.table([{ h: 'Distributor', k: 'd' }, { h: 'Facility', k: 'fac' }, { h: 'Available (Rp)', k: 'avail', num: true }], list);
+        const ex = X('limit_kredit.xlsx', 'Limit', M);
+        const k0 = rows.findIndex((x) => list.some((l) => l.d === x.name)), w = list.findIndex((l) => l.d === rows[k0].name);
+        const a0 = list[w].avail, o0 = rows[k0].order;
+        /* The hidden test: the bank revises one available limit so that order's cover changes, and one order is corrected. */
+        const mAlt = H.edit(M.cells, { [M.cell('Available (Rp)', w)]: a0 >= o0 ? Math.round(o0 / 2000000) * 1000000 : o0 + 5000000 });
+        const alt = H.edit(S.cells, { [S.cell('Order (Rp)', (k0 + 3) % rows.length)]: (x) => x + 7000000 });
+        const KA = ex.A('Distributor'), VA = ex.A('Available (Rp)'), TA = ex.T('Distributor', 'Available (Rp)');
+        p = { title: 'Order amount covered by the available limit in the bank file', file: 'pesanan_minggu.xlsx', sheetName: 'Pesanan', S, alt, books: [wb('limit_kredit.xlsx', 'Limit', M, mAlt)], ans: 'Covered (Rp)', KA, VA,
+          statement: `<p>${opens([['this week\'s orders', 'pesanan_minggu.xlsx'], ['Bank Kenari\'s limit file', 'limit_kredit.xlsx']])} The bank finances each order up to the distributor's <b>Available (Rp)</b> limit. A distributor without a facility is not in the limit file.</p><p>In <b>E5</b>, work out the <b>Covered (Rp)</b> part of each order: the smaller of its <b>Order (Rp)</b> and the available limit, with <b>0</b> as the limit when the distributor is not listed. Fill it down to <b>E${S.last}</b>.</p>`,
+          solution: `=MIN(D5,XLOOKUP(B5,${KA},${VA},0))`,
+          alts: [`=MIN(D5,IFERROR(VLOOKUP(B5,${TA},3,FALSE),0))`, `=IFNA(MIN(D5,INDEX(${VA},MATCH(B5,${KA},0))),0)`, `=MIN(XLOOKUP(B5,${KA},${VA},0),D5)`],
+          fb: '0', shape: `=MIN(D5, XLOOKUP(B5, ${KA}, ${VA}, 0))`, chips: ['MIN(D5,', 'B5', KA, VA, TA, ',0)'],
+          explain: `XLOOKUP brings the available limit from limit_kredit.xlsx, or 0 when the distributor has no facility. MIN then caps the order at that limit: an order below the limit is covered in full, one above it only up to the limit.` };
       } else if (v === 2) {
         const outs = r.sample(H.db().outlets, 15);
-        list = outs.slice(0, 12).sort((a, b) => (a.outlet_id < b.outlet_id ? -1 : 1));
+        const list = outs.slice(0, 12).sort((a, b) => (a.outlet_id < b.outlet_id ? -1 : 1)).map((o) => ({ id: o.outlet_id, name: o.outlet, rate: r.int(6, 20) * 100 }));
         const strangers = outs.slice(12);
-        rows = H.sales(r, 14).map((s, k) => ({ date: s.date, id: [3, 7, 11].includes(k) ? strangers[[3, 7, 11].indexOf(k)].outlet_id : r.pick(list).outlet_id, rep: r.pick(H.REPS), cartons: r.int(2, 20) }));
-        S = H.table([{ h: 'Date', k: 'date', date: true }, { h: 'Outlet ID', k: 'id' }, { h: 'Rep', k: 'rep' }, { h: 'Cartons', k: 'cartons', num: true }], rows);
-        M = H.table([{ h: 'Outlet ID', k: 'outlet_id' }, { h: 'Outlet', k: 'outlet' }], list, { startCol: 6 });
-        e[S.cell('Outlet ID', 3)] = list[0].outlet_id;
-        e[S.cell('Outlet ID', 0)] = strangers[1].outlet_id;
-        spec = { title: 'Outlet name for each visit, or New outlet', file: 'kunjungan_outlet.xlsx', key: 'B5', keyName: 'Outlet ID', ans: 'Outlet', fb: '"New outlet"',
-          what: 'the name of the visited <b>Outlet ID</b>', why: 'Reps also visit outlets that are not in the master list yet.', fbText: 'the words <b>New outlet</b>' };
+        const rows = H.sales(r, 14).map((s, k) => ({ date: s.date, id: [3, 7, 11].includes(k) ? strangers[[3, 7, 11].indexOf(k)].outlet_id : r.pick(list).id, rep: r.pick(H.REPS), cartons: r.int(2, 20) }));
+        const S = H.table([{ h: 'Date', k: 'date', date: true }, { h: 'Outlet ID', k: 'id' }, { h: 'Rep', k: 'rep' }, { h: 'Cartons', k: 'cartons', num: true }], rows);
+        const M = H.table([{ h: 'Outlet ID', k: 'id' }, { h: 'Outlet', k: 'name' }, { h: 'Rate (Rp per carton)', k: 'rate', num: true }], list);
+        const std = r.pick([2200, 2500, 2800]);
+        const ST = H.table([{ h: 'Setting', k: 's' }, { h: 'Value', k: 'v', num: true }], [{ s: 'Standard rate (Rp per carton)', v: std }]);
+        const ex = X('tarif_kirim.xlsx', 'Outlet', M), SR = X(null, 'Setup', ST).abs('Value', 0);
+        /* The hidden test: the rate card raises one outlet's rate, the standard rate on the Setup sheet goes up, and two
+           visits are corrected to other outlets. */
+        const mAlt = H.edit(M.cells, { [M.cell('Rate (Rp per carton)', 0)]: (x) => x + 200 });
+        const stAlt = H.edit(ST.cells, { [ST.cell('Value', 0)]: std + 300 });
+        const alt = H.edit(S.cells, { [S.cell('Outlet ID', 3)]: list[0].id, [S.cell('Outlet ID', 0)]: strangers[1].outlet_id });
+        const KA = ex.A('Outlet ID'), VA = ex.A('Rate (Rp per carton)'), TA = ex.T('Outlet ID', 'Rate (Rp per carton)');
+        p = { title: 'Delivery cost per visit, standard rate for outlets not listed', file: 'kunjungan_outlet.xlsx', sheetName: 'Kunjungan', S, alt, books: [wb('tarif_kirim.xlsx', 'Outlet', M, mAlt)],
+          sheets: [{ name: 'Setup', sheet: ST, base: ST.cells, alt: stAlt }], ans: 'Delivery (Rp)', KA, VA,
+          statement: `<p>Two workbooks are open: the visit log (<b>kunjungan_outlet.xlsx</b>, with the sheets Kunjungan and Setup) and the delivery rate card (<b>tarif_kirim.xlsx</b>). Reps also visit new outlets that are not on the rate card yet.</p><p>In <b>E5</b>, work out the <b>Delivery (Rp)</b> of each visit: its <b>Cartons</b> times the outlet's <b>Rate (Rp per carton)</b> from the rate card. For an outlet that is not on the card, use the standard rate on the Setup sheet, cell <b>B5</b>. Fill it down to <b>E${S.last}</b>.</p>`,
+          solution: `=D5*XLOOKUP(B5,${KA},${VA},${SR})`,
+          alts: [`=D5*IFERROR(VLOOKUP(B5,${TA},3,FALSE),${SR})`, `=D5*IFNA(INDEX(${VA},MATCH(B5,${KA},0)),${SR})`, `=IFNA(D5*XLOOKUP(B5,${KA},${VA}),D5*${SR})`],
+          fb: SR, shape: `=D5*XLOOKUP(B5, ${KA}, ${VA}, ${SR})`, chips: ['D5*', 'B5', KA, VA, TA, SR],
+          explain: `XLOOKUP's fourth part can be a cell, not only a fixed value. When B5 is not on the rate card, it returns the standard rate from ${SR}, a sheet of the same workbook, written without a file name. The $ signs keep every range in place as the formula fills down.` };
       } else {
         const prods = r.shuffle(H.PRODUCTS);
-        list = prods.slice(0, 4).map((p) => ({ sku: p.sku, pct: r.pick([5, 7.5, 10, 12.5, 15]) }));
-        const priceOf = (sku) => H.PRODUCTS.find((p) => p.sku === sku).carton_price;
-        rows = H.sales(r, 14);
+        const list = prods.slice(0, 4).map((x) => ({ sku: x.sku, name: x.name, pct: r.pick([5, 7.5, 10, 12.5, 15]) }));
+        const priceOf = (sku) => H.PRODUCTS.find((x) => x.sku === sku).carton_price;
+        const rows = H.sales(r, 14);
         rows[1].sku = list[0].sku; rows[5].sku = list[1].sku; rows[9].sku = list[2].sku;
         rows.forEach((x) => { x.gross = x.cartons * priceOf(x.sku); });
-        S = H.table([{ h: 'Date', k: 'date', date: true }, { h: 'SKU', k: 'sku' }, { h: 'Cartons', k: 'cartons', num: true }, { h: 'Gross (Rp)', k: 'gross', num: true }], rows);
-        M = H.table([{ h: 'SKU', k: 'sku' }, { h: 'Promo (%)', k: 'pct', num: true }], list, { startCol: 6 });
-        e[M.cell('Promo (%)', 0)] = (x) => x + 2.5;
-        const k3 = list.some((p) => p.sku === rows[3].sku) ? prods[6].sku : list[3].sku;
-        e[S.cell('SKU', 3)] = k3;
-        e[S.cell('Gross (Rp)', 3)] = rows[3].cartons * priceOf(k3);
-        spec = { title: 'Promo discount per line, or 0 without a promo', file: 'promo_q4.xlsx', key: 'B5', keyName: 'SKU', ans: 'Discount (Rp)', fb: '0', round: true,
-          what: 'the promo discount in rupiah: the line\'s <b>Gross (Rp)</b> times the <b>Promo (%)</b> of its SKU, divided by 100 and rounded to whole rupiah', why: 'Only four SKUs are on promo this month.', fbText: '<b>0</b>' };
+        const S = H.table([{ h: 'Date', k: 'date', date: true }, { h: 'SKU', k: 'sku' }, { h: 'Cartons', k: 'cartons', num: true }, { h: 'Gross (Rp)', k: 'gross', num: true }], rows);
+        const M = H.table([{ h: 'SKU', k: 'sku' }, { h: 'Product', k: 'name' }, { h: 'Promo (%)', k: 'pct', num: true }], list);
+        const ex = X('promo_q4.xlsx', 'Promo', M);
+        /* The hidden test: the promo file deepens one promo, and line 4 turns out to be another SKU. */
+        const mAlt = H.edit(M.cells, { [M.cell('Promo (%)', 0)]: (x) => x + 2.5 });
+        const k3 = list.some((x) => x.sku === rows[3].sku) ? prods[6].sku : list[3].sku;
+        const alt = H.edit(S.cells, { [S.cell('SKU', 3)]: k3, [S.cell('Gross (Rp)', 3)]: rows[3].cartons * priceOf(k3) });
+        const KA = ex.A('SKU'), VA = ex.A('Promo (%)'), TA = ex.T('SKU', 'Promo (%)');
+        p = { title: 'Promo discount from the promo workbook, 0 without a promo', file: 'penjualan_q4.xlsx', sheetName: 'Penjualan', S, alt, books: [wb('promo_q4.xlsx', 'Promo', M, mAlt)], ans: 'Discount (Rp)', KA, VA,
+          statement: `<p>${opens([['the sales lines', 'penjualan_q4.xlsx'], ['the Q4 promos', 'promo_q4.xlsx']])} Only four SKUs are on promo.</p><p>In <b>E5</b>, work out the promo discount in rupiah: the line's <b>Gross (Rp)</b> times the <b>Promo (%)</b> of its SKU, divided by 100 and rounded to whole rupiah with ROUND. A SKU that is not in the promo file has a promo of <b>0</b>. Fill it down to <b>E${S.last}</b>.</p>`,
+          solution: `=ROUND(D5*XLOOKUP(B5,${KA},${VA},0)/100,0)`,
+          alts: [`=ROUND(D5*IFERROR(VLOOKUP(B5,${TA},3,FALSE),0)/100,0)`, `=IFERROR(ROUND(D5*VLOOKUP(B5,${TA},3,FALSE)/100,0),0)`, `=ROUND(D5*IFNA(INDEX(${VA},MATCH(B5,${KA},0)),0)/100,0)`],
+          fb: '0', shape: `=ROUND(D5*XLOOKUP(B5, ${KA}, ${VA}, 0)/100, 0)`, chips: ['D5*', 'B5', KA, VA, TA, ',0)'],
+          explain: `XLOOKUP returns the SKU's promo from promo_q4.xlsx, or 0 when the SKU has no promo. Gross times that percentage, divided by 100 and rounded, is the discount in rupiah, so a line without a promo gets 0.` };
       }
-      const B = board([S, M]);
-      const alt = H.edit(B.cells, e);
-      const KA = M.A(M.cells[M.cols[0] + '4']), VA = M.A(M.cells[M.cols[1] + '4']), TA = '$G$5:$H$' + M.last;
-      const k = spec.key, fb = spec.fb;
-      const wrap = (x) => (spec.round ? '=ROUND(D5*' + x + '/100,0)' : '=' + x);
-      const solution = wrap(`XLOOKUP(${k},${KA},${VA},${fb})`);
-      const alts = spec.round
-        ? [`=ROUND(D5*IFERROR(VLOOKUP(${k},${TA},2,FALSE),0)/100,0)`, `=IFERROR(ROUND(D5*VLOOKUP(${k},${TA},2,FALSE)/100,0),0)`, `=ROUND(D5*IFNA(INDEX(${VA},MATCH(${k},${KA},0)),0)/100,0)`]
-        : [`=IFERROR(VLOOKUP(${k},${TA},2,FALSE),${fb})`, `=IFNA(INDEX(${VA},MATCH(${k},${KA},0)),${fb})`, `=IFNA(VLOOKUP(${k},${TA},2,FALSE),${fb})`];
-      return build(B, {
-        title: spec.title, file: spec.file, base: B.cells, alt, fill: true, fillCol: 'E', ansLabel: spec.ans,
-        statement: `<p>${spec.why} Using the list in <b>G5:H${M.last}</b>, in <b>E5</b> return ${spec.what}. When the row's ${spec.keyName} (column ${k.replace('5', '')}) is not on the list, show ${spec.fbText} instead of #N/A. Fill it down to <b>E${S.last}</b>.</p>`,
-        solution, alts,
-        hints: ['A plain lookup gives #N/A for a key that is not on the list. XLOOKUP has a fourth part for that case: what to show when nothing is found.',
-          `Pin the list with $ (${KA} and ${VA}). IFERROR(VLOOKUP(...), ${fb}) works too.`,
-          `Shape: ${wrap('XLOOKUP(' + k + ', ' + KA + ', ' + VA + ', ' + fb + ')')}`],
-        explain: `XLOOKUP's fourth part, if_not_found, is returned when ${k} is missing from ${KA}, so missing keys show ${fb.replace(/"/g, '')} instead of #N/A. IFERROR or IFNA around VLOOKUP gives the same result.`,
-        chips: [k, KA, VA, ',' + fb + ')'], fnKey: 'XLOOKUP('
+      return H.problem({
+        title: p.title, file: p.file, sheetName: p.sheetName, sheet: p.S, base: p.S.cells, alt: p.alt, fill: true, fillCol: 'E', ansLabel: p.ans, books: p.books, sheets: p.sheets,
+        statement: p.statement, solution: p.solution, alts: p.alts,
+        hints: ['A plain lookup gives #N/A for a key that is not on the list. XLOOKUP has a fourth part for that case: what to return when nothing is found.',
+          `The list sits in another workbook: pin it with $ (${p.KA} and ${p.VA}). IFERROR(VLOOKUP(...), ${p.fb}) works too.`,
+          `Shape: ${p.shape}`],
+        explain: p.explain, chips: p.chips, fnKey: 'XLOOKUP('
       });
     }
   });
@@ -547,7 +593,6 @@
       });
     }
   });
-
   P.add({
     key: 'two-lookups-in-one-formula', difficulty: 'Medium', level: 6, topics: ['XLOOKUP', 'VLOOKUP'], count: 4,
     make(r, v) {
@@ -629,7 +674,6 @@
       });
     }
   });
-
   P.add({
     key: 'name-of-the-top-row', difficulty: 'Medium', level: 6, topics: ['INDEX', 'MATCH', 'MAX', 'MIN'], count: 3,
     make(r, v) {
@@ -673,28 +717,29 @@
       });
     }
   });
-
   P.add({
-    key: 'check-against-the-master', difficulty: 'Medium', level: 7, topics: ['IF', 'XLOOKUP', 'VLOOKUP'], count: 4,
+    key: 'check-against-the-master', difficulty: 'Medium', level: 7, topics: ['IF', 'XLOOKUP', 'VLOOKUP', 'Several workbooks'], count: 4, multi: true,
     make(r, v) {
-      /* Compare each row with a figure looked up from a master list, and write one of two words. */
+      /* Compare each row with a figure looked up in a master kept in another workbook, and write one of two words. */
       if (v === 0) {
         const rows = H.sales(r, 14);
-        const list = r.shuffle(H.PRODUCTS).map((p) => ({ sku: p.sku, oh: r.int(2, 7) * 10 }));
+        const list = r.shuffle(H.PRODUCTS).map((x) => ({ sku: x.sku, name: x.name, oh: r.int(2, 7) * 10 }));
         const S = H.table([{ h: 'Date', k: 'date', date: true }, { h: 'Distributor', k: 'distributor' }, { h: 'SKU', k: 'sku' }, { h: 'Cartons', k: 'cartons', num: true }], rows);
-        const M = H.table([{ h: 'SKU', k: 'sku' }, { h: 'On hand', k: 'oh', num: true }], list, { startCol: 6 });
-        const B = board([S, M]);
+        const M = H.table([{ h: 'SKU', k: 'sku' }, { h: 'Product', k: 'name' }, { h: 'On hand', k: 'oh', num: true }], list);
+        const ex = X('stok_gudang.xlsx', 'Stok', M);
         const w = list.findIndex((x) => x.sku === rows[0].sku), c0 = rows[0].cartons;
-        const alt = H.edit(B.cells, { [M.cell('On hand', w)]: c0 > list[w].oh ? c0 : c0 - 1 });
-        const KA = M.A('SKU'), VA = M.A('On hand');
-        return build(B, {
-          title: 'Mark order lines that exceed stock on hand', file: 'pesanan_q4.xlsx', base: B.cells, alt, fill: true, fillCol: 'E', ansLabel: 'Stock check',
-          statement: `<p>In <b>E5</b>, show <b>Short</b> when the line's <b>Cartons</b> are more than the <b>On hand</b> for its SKU in <b>G5:H16</b>, and <b>OK</b> otherwise (equal is OK). Fill it down to <b>E${S.last}</b>.</p>`,
+        /* The hidden test: the stock count for row 5's SKU is recounted, so that line flips. */
+        const mAlt = H.edit(M.cells, { [M.cell('On hand', w)]: c0 > list[w].oh ? c0 : c0 - 1 });
+        const KA = ex.A('SKU'), VA = ex.A('On hand'), TA = ex.T('SKU', 'On hand');
+        return H.problem({
+          title: 'Mark order lines short of stock in the warehouse workbook', file: 'pesanan_q4.xlsx', sheetName: 'Pesanan', sheet: S, base: S.cells, alt: S.cells, fill: true, fillCol: 'E', ansLabel: 'Stock check',
+          books: [wb('stok_gudang.xlsx', 'Stok', M, mAlt)],
+          statement: `<p>${opens([['the order lines', 'pesanan_q4.xlsx'], ['the warehouse stock count', 'stok_gudang.xlsx']])} In <b>E5</b>, show <b>Short</b> when the line's <b>Cartons</b> are more than the <b>On hand</b> for its SKU in the stock count, and <b>OK</b> otherwise (equal is OK). Fill it down to <b>E${S.last}</b>.</p>`,
           solution: `=IF(D5>XLOOKUP(C5,${KA},${VA}),"Short","OK")`,
-          alts: [`=IF(D5<=VLOOKUP(C5,$G$5:$H$16,2,FALSE),"OK","Short")`, `=IF(INDEX(${VA},MATCH(C5,${KA},0))<D5,"Short","OK")`],
-          hints: ['First look up the On hand for the SKU in C5, then compare it with D5 inside IF.', `Pin the stock list: ${KA} and ${VA}. "More than" is >.`, `Shape: =IF(D5 > XLOOKUP(C5, ${KA}, ${VA}), "Short", "OK")`],
-          explain: 'XLOOKUP returns the stock for the line\'s SKU and IF compares the order with it. A line equal to the stock is still OK, because only more than the stock is short.',
-          chips: ['D5', 'C5', KA, VA, '"Short"', '"OK"'], fnKey: 'XLOOKUP('
+          alts: [`=IF(D5<=VLOOKUP(C5,${TA},3,FALSE),"OK","Short")`, `=IF(INDEX(${VA},MATCH(C5,${KA},0))<D5,"Short","OK")`],
+          hints: ['First look up the On hand for the SKU in C5 in stok_gudang.xlsx, then compare it with D5 inside IF.', `Pin the stock list: ${KA} and ${VA}. "More than" is >.`, `Shape: =IF(D5 > XLOOKUP(C5, ${KA}, ${VA}), "Short", "OK")`],
+          explain: 'XLOOKUP returns the stock for the line\'s SKU from the other workbook, and IF compares the order with it. A line equal to the stock is still OK, because only more than the stock is short.',
+          chips: ['D5', 'C5', KA, VA, TA, '"Short"', '"OK"'], fnKey: 'XLOOKUP('
         });
       }
       if (v === 1) {
@@ -702,38 +747,43 @@
         r.sample(nums(14), 3).forEach((k) => { rows[k].charged += r.pick([-5000, -3000, 2000, 4000]); });
         const list = r.shuffle(H.PRODUCTS);
         const S = H.table([{ h: 'Invoice', k: 'invoice' }, { h: 'SKU', k: 'sku' }, { h: 'Cartons', k: 'cartons', num: true }, { h: 'Price charged (Rp)', k: 'charged', num: true }], rows);
-        const M = H.table([{ h: 'SKU', k: 'sku' }, { h: 'List price (Rp)', k: 'carton_price', num: true }], list, { startCol: 6 });
-        const B = board([S, M]);
-        const lp = H.PRODUCTS.find((p) => p.sku === rows[0].sku).carton_price;
-        const alt = H.edit(B.cells, { [S.cell('Price charged (Rp)', 0)]: rows[0].charged === lp ? lp + 1000 : lp });
-        const KA = M.A('SKU'), VA = M.A('List price (Rp)');
-        return build(B, {
-          title: 'Flag lines charged off the list price', file: 'audit_harga.xlsx', base: B.cells, alt, fill: true, fillCol: 'E', ansLabel: 'Price check',
-          statement: `<p>In <b>E5</b>, show <b>Check</b> when the <b>Price charged (Rp)</b> is different from the <b>List price (Rp)</b> of the line's SKU in <b>G5:H16</b>, and <b>OK</b> when they are the same. Fill it down to <b>E${S.last}</b>.</p>`,
+        const M = H.table([{ h: 'SKU', k: 'sku' }, { h: 'Product', k: 'name' }, { h: 'List price (Rp)', k: 'carton_price', num: true }], list);
+        const ex = X('daftar_harga.xlsx', 'Harga', M);
+        const lp = H.PRODUCTS.find((x) => x.sku === rows[0].sku).carton_price, w = list.findIndex((x) => x.sku === rows[0].sku);
+        /* The hidden test: the price list is revised for row 5's SKU, so lines that matched the old price now differ,
+           or an off-price line now matches. */
+        const mAlt = H.edit(M.cells, { [M.cell('List price (Rp)', w)]: rows[0].charged === lp ? lp + 1000 : rows[0].charged });
+        const KA = ex.A('SKU'), VA = ex.A('List price (Rp)'), TA = ex.T('SKU', 'List price (Rp)');
+        return H.problem({
+          title: 'Flag lines charged off the list in the price workbook', file: 'audit_harga.xlsx', sheetName: 'Audit', sheet: S, base: S.cells, alt: S.cells, fill: true, fillCol: 'E', ansLabel: 'Price check',
+          books: [wb('daftar_harga.xlsx', 'Harga', M, mAlt)],
+          statement: `<p>${opens([['the invoiced lines', 'audit_harga.xlsx'], ['the price list', 'daftar_harga.xlsx']])} In <b>E5</b>, show <b>Check</b> when the <b>Price charged (Rp)</b> is different from the <b>List price (Rp)</b> of the line's SKU in the price list, and <b>OK</b> when they are the same. Fill it down to <b>E${S.last}</b>.</p>`,
           solution: `=IF(D5<>XLOOKUP(B5,${KA},${VA}),"Check","OK")`,
-          alts: [`=IF(D5=VLOOKUP(B5,$G$5:$H$16,2,FALSE),"OK","Check")`, `=IF(D5=INDEX(${VA},MATCH(B5,${KA},0)),"OK","Check")`],
-          hints: ['Look up the list price for the SKU in B5, then compare it with the price in D5.', '<> means "is not equal to". Pin the price list with $.', `Shape: =IF(D5 <> XLOOKUP(B5, ${KA}, ${VA}), "Check", "OK")`],
-          explain: 'XLOOKUP brings the list price for the line\'s SKU and IF compares it with what was charged. Any difference, up or down, is flagged.',
-          chips: ['D5', 'B5', KA, VA, '"Check"', '"OK"'], fnKey: 'XLOOKUP('
+          alts: [`=IF(D5=VLOOKUP(B5,${TA},3,FALSE),"OK","Check")`, `=IF(D5=INDEX(${VA},MATCH(B5,${KA},0)),"OK","Check")`],
+          hints: ['Look up the list price for the SKU in B5 in daftar_harga.xlsx, then compare it with the price in D5.', '<> means "is not equal to". Pin the price list with $.', `Shape: =IF(D5 <> XLOOKUP(B5, ${KA}, ${VA}), "Check", "OK")`],
+          explain: 'XLOOKUP brings the list price for the line\'s SKU from the price workbook, and IF compares it with what was charged. Any difference, up or down, is flagged. When the list price is revised, the flags follow.',
+          chips: ['D5', 'B5', KA, VA, TA, '"Check"', '"OK"'], fnKey: 'XLOOKUP('
         });
       }
       if (v === 2) {
         const rows = H.reps(r, 10);
         const list = r.shuffle(rows).map((x) => ({ name: x.name, target: x.target }));
         const S = H.table([{ h: 'Rep', k: 'name' }, { h: 'Area', k: 'area' }, { h: 'Actual (Rp)', k: 'actual', num: true }], rows);
-        const M = H.table([{ h: 'Rep', k: 'name' }, { h: 'Target (Rp)', k: 'target', num: true }], list, { startCol: 5 });
-        const B = board([S, M]);
+        const M = H.table([{ h: 'Rep', k: 'name' }, { h: 'Target (Rp)', k: 'target', num: true }], list);
+        const ex = X('target_sales.xlsx', 'Target', M);
         const w = list.findIndex((x) => x.name === rows[0].name);
-        const alt = H.edit(B.cells, { [M.cell('Target (Rp)', w)]: rows[0].actual >= rows[0].target ? rows[0].actual + 100000 : rows[0].actual });
-        const KA = M.A('Rep'), VA = M.A('Target (Rp)');
-        return build(B, {
-          title: 'Hit or miss against a separate target table', file: 'target_sales.xlsx', base: B.cells, alt, fill: true, fillCol: 'D', ansLabel: 'Result',
-          statement: `<p>The targets sit in their own table, <b>F5:G14</b>, in a different order. In <b>D5</b>, show <b>Hit</b> when the rep's <b>Actual (Rp)</b> is at least their target, and <b>Miss</b> when it is below. Fill it down to <b>D${S.last}</b>.</p>`,
+        /* The hidden test: the first rep's target is revised in the targets file, so their result flips. */
+        const mAlt = H.edit(M.cells, { [M.cell('Target (Rp)', w)]: rows[0].actual >= rows[0].target ? rows[0].actual + 100000 : rows[0].actual });
+        const KA = ex.A('Rep'), VA = ex.A('Target (Rp)'), TA = ex.T('Rep', 'Target (Rp)');
+        return H.problem({
+          title: 'Hit or miss against targets kept in another workbook', file: 'realisasi_sales.xlsx', sheetName: 'Realisasi', sheet: S, base: S.cells, alt: S.cells, fill: true, fillCol: 'D', ansLabel: 'Result',
+          books: [wb('target_sales.xlsx', 'Target', M, mAlt)],
+          statement: `<p>${opens([['the actual sales', 'realisasi_sales.xlsx'], ['the targets', 'target_sales.xlsx']])} The targets file lists the reps in a different order. In <b>D5</b>, show <b>Hit</b> when the rep's <b>Actual (Rp)</b> is at least their target, and <b>Miss</b> when it is below. Fill it down to <b>D${S.last}</b>.</p>`,
           solution: `=IF(C5>=XLOOKUP(A5,${KA},${VA}),"Hit","Miss")`,
-          alts: [`=IF(C5<VLOOKUP(A5,$F$5:$G$14,2,FALSE),"Miss","Hit")`, `=IF(C5>=INDEX(${VA},MATCH(A5,${KA},0)),"Hit","Miss")`],
-          hints: ['The two tables are in different orders, so look the target up by name rather than reading the same row.', `"At least" is >=. Pin the target table: ${KA} and ${VA}.`, `Shape: =IF(C5 >= XLOOKUP(A5, ${KA}, ${VA}), "Hit", "Miss")`],
-          explain: 'XLOOKUP finds each rep\'s own target by name, wherever it sits in the target table. IF then compares it with the actual; reaching the target exactly counts as a hit.',
-          chips: ['A5', 'C5', KA, VA, '"Hit"', '"Miss"'], fnKey: 'XLOOKUP('
+          alts: [`=IF(C5<VLOOKUP(A5,${TA},2,FALSE),"Miss","Hit")`, `=IF(C5>=INDEX(${VA},MATCH(A5,${KA},0)),"Hit","Miss")`],
+          hints: ['The two files list the reps in different orders, so look the target up by name rather than reading the same row.', `"At least" is >=. Pin the target range in the other workbook: ${KA} and ${VA}.`, `Shape: =IF(C5 >= XLOOKUP(A5, ${KA}, ${VA}), "Hit", "Miss")`],
+          explain: 'XLOOKUP finds each rep\'s own target by name in target_sales.xlsx, wherever it sits. IF then compares it with the actual; reaching the target exactly counts as a hit.',
+          chips: ['A5', 'C5', KA, VA, TA, '"Hit"', '"Miss"'], fnKey: 'XLOOKUP('
         });
       }
       const fac = r.shuffle(WC());
@@ -742,21 +792,22 @@
       /* One request is exactly the headroom, so "at most" against "less than" shows on the visible sheet. */
       rows[3].amt = ds[3].limit - ds[3].outstanding;
       const S = H.table([{ h: 'Request', k: 'req' }, { h: 'Distributor', k: 'd' }, { h: 'Amount (Rp)', k: 'amt', num: true }], rows);
-      const M = H.table([{ h: 'Distributor', k: 'distributor' }, { h: 'Limit (Rp)', k: 'limit', num: true }, { h: 'Outstanding (Rp)', k: 'outstanding', num: true }], fac, { startCol: 5 });
-      const B = board([S, M]);
+      const M = H.table([{ h: 'Distributor', k: 'distributor' }, { h: 'Limit (Rp)', k: 'limit', num: true }, { h: 'Outstanding (Rp)', k: 'outstanding', num: true }], fac);
+      const ex = X('buku_pinjaman.xlsx', 'Fasilitas', M);
       const f0 = fac.findIndex((x) => x.distributor === rows[0].d), head0 = fac[f0].limit - fac[f0].outstanding;
-      /* The hidden sheet flips row 1: a request within its headroom gets 100,000 less headroom than it asks for, and one
-         over it is cut to exactly the headroom. */
-      const alt = H.edit(B.cells, rows[0].amt <= head0 ? { [M.cell('Outstanding (Rp)', f0)]: fac[f0].limit - rows[0].amt + 100000 } : { [S.cell('Amount (Rp)', 0)]: head0 });
-      const KA = M.A('Distributor'), LA = M.A('Limit (Rp)'), OA = M.A('Outstanding (Rp)');
-      return build(B, {
-        title: 'Check drawdown requests against facility headroom', file: 'permintaan_pencairan.xlsx', base: B.cells, alt, fill: true, fillCol: 'D', ansLabel: 'Decision',
-        statement: `<p>Each request asks to draw more money from a facility. In <b>D5</b>, show <b>Within</b> when the request's <b>Amount (Rp)</b> is at most the distributor's headroom (Limit minus Outstanding, from <b>F5:H18</b>), and <b>Over</b> when it is more. Fill it down to <b>D${S.last}</b>.</p>`,
+      /* The hidden test flips row 5 in the loan book: a request within its headroom meets an outstanding balance that
+         leaves 100,000 less than it asks for, and one over it meets a balance that leaves exactly enough. */
+      const mAlt = H.edit(M.cells, { [M.cell('Outstanding (Rp)', f0)]: Math.max(0, fac[f0].limit - rows[0].amt + (rows[0].amt <= head0 ? 100000 : 0)) });
+      const KA = ex.A('Distributor'), LA = ex.A('Limit (Rp)'), OA = ex.A('Outstanding (Rp)'), TA = ex.T('Distributor', 'Outstanding (Rp)');
+      return H.problem({
+        title: 'Drawdown requests checked against headroom in the loan book', file: 'permintaan_pencairan.xlsx', sheetName: 'Permintaan', sheet: S, base: S.cells, alt: S.cells, fill: true, fillCol: 'D', ansLabel: 'Decision',
+        books: [wb('buku_pinjaman.xlsx', 'Fasilitas', M, mAlt)],
+        statement: `<p>${opens([['the drawdown requests', 'permintaan_pencairan.xlsx'], ['the loan book', 'buku_pinjaman.xlsx']])} Each request asks to draw more money from a facility. In <b>D5</b>, show <b>Within</b> when the request's <b>Amount (Rp)</b> is at most the distributor's headroom (its <b>Limit (Rp)</b> minus its <b>Outstanding (Rp)</b> in the loan book), and <b>Over</b> when it is more. Fill it down to <b>D${S.last}</b>.</p>`,
         solution: `=IF(C5<=XLOOKUP(B5,${KA},${LA})-XLOOKUP(B5,${KA},${OA}),"Within","Over")`,
-        alts: [`=IF(C5>VLOOKUP(B5,$F$5:$H$18,2,FALSE)-VLOOKUP(B5,$F$5:$H$18,3,FALSE),"Over","Within")`, `=IF(C5<=INDEX(${LA},MATCH(B5,${KA},0))-INDEX(${OA},MATCH(B5,${KA},0)),"Within","Over")`, `=IF(C5<=XLOOKUP(B5,${KA},${LA}-${OA}),"Within","Over")`],
-        hints: ['Headroom needs two lookups for the same distributor: the limit and the outstanding balance.', `"At most" is <=. Pin the facility table: ${KA}, ${LA} and ${OA}.`, `Shape: =IF(C5 <= XLOOKUP(B5, ${KA}, ${LA}) - XLOOKUP(B5, ${KA}, ${OA}), "Within", "Over")`],
-        explain: 'The two XLOOKUPs give the distributor\'s limit and outstanding balance; their difference is the headroom. IF compares the request with it, and a request equal to the headroom still fits.',
-        chips: ['B5', 'C5', KA, LA, OA, '"Within"', '"Over"'], fnKey: 'XLOOKUP('
+        alts: [`=IF(C5>VLOOKUP(B5,${TA},2,FALSE)-VLOOKUP(B5,${TA},3,FALSE),"Over","Within")`, `=IF(C5<=INDEX(${LA},MATCH(B5,${KA},0))-INDEX(${OA},MATCH(B5,${KA},0)),"Within","Over")`, `=IF(C5<=XLOOKUP(B5,${KA},${LA}-${OA}),"Within","Over")`],
+        hints: ['Headroom needs two lookups in buku_pinjaman.xlsx for the same distributor: the limit and the outstanding balance.', `"At most" is <=. Pin the ranges in the loan book: ${KA}, ${LA} and ${OA}.`, `Shape: =IF(C5 <= XLOOKUP(B5, ${KA}, ${LA}) - XLOOKUP(B5, ${KA}, ${OA}), "Within", "Over")`],
+        explain: 'The two XLOOKUPs bring the distributor\'s limit and outstanding balance from the loan book; their difference is the headroom. IF compares the request with it, and a request equal to the headroom still fits.',
+        chips: ['B5', 'C5', KA, LA, OA, TA, '"Within"', '"Over"'], fnKey: 'XLOOKUP('
       });
     }
   });
@@ -822,391 +873,665 @@
     }
   });
 
-  /* ======================= Hard ======================= */
-
+  /* ======================= Hard: two or more lookups across three or four workbooks ======================= */
   P.add({
-    key: 'two-way-grid-lookup', difficulty: 'Hard', level: 8, topics: ['INDEX', 'MATCH', 'XLOOKUP'], count: 4,
+    key: 'two-way-grid-lookup', difficulty: 'Hard', level: 8, topics: ['INDEX', 'MATCH', 'XLOOKUP', 'Several workbooks'], count: 4, multi: true,
     make(r, v) {
-      /* A grid: one key down column A, the other across row 4. B1 picks the row, B2 the column, the answer goes in B3. */
-      if (v <= 2) {
-        const V = [
-          { title: 'Freight per carton where a region meets a warehouse', file: 'tarif_kirim.xlsx', corner: 'Region', rows: H.REGIONS.slice(), heads: ['Bekasi', 'Bandung', 'Semarang', 'Surabaya', 'Medan'],
-            val: () => r.int(6, 40) * 500, rl: 'Region', cl: 'Warehouse', al: 'Freight (Rp per carton)', step: 1500, what: 'the freight cost per carton from the warehouse in <b>B2</b> to the region in <b>B1</b>' },
-          { title: 'Interest rate by loan type and tenor (two-way lookup)', file: 'suku_bunga.xlsx', corner: 'Loan type', rows: ['Working Capital', 'Term Loan', 'Trade Finance', 'Investment'], heads: [1, 2, 3, 5],
-            val: null, rl: 'Loan type', cl: 'Tenor (years)', al: 'Rate (% a year)', step: 0.25, what: 'the yearly interest rate for the loan type in <b>B1</b> and the tenor in years in <b>B2</b>' },
-          { title: "One rep's sales in a chosen month (two-way lookup)", file: 'sales_per_rep.xlsx', corner: 'Rep', rows: r.sample(H.REPS, 8), heads: ['Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
-            val: () => r.int(40, 160) * 1000000, rl: 'Sales rep', cl: 'Month', al: 'Sales (Rp)', step: 2500000, what: 'the sales of the rep in <b>B1</b> in the month in <b>B2</b>' }
-        ][v];
-        const b0 = r.pick([8.5, 9]), add = [0, 1, -0.5, 1.5], ten = [0, 0.25, 0.5, 1];
-        const vals = V.rows.map((x, i) => V.heads.map((h, j) => (V.val ? V.val() : b0 + add[i] + ten[j] + r.pick([0, 0.25]))));
-        const S = across(V.corner, V.heads, V.rows.map((h, i) => ({ h, vals: vals[i] })));
-        const nr = V.rows.length, nc = V.heads.length;
-        const i = r.int(1, nr - 1), j = r.int(1, nc - 1);
-        let i2, j2;
-        do { i2 = r.int(0, nr - 1); j2 = r.int(0, nc - 1); } while (i2 === i || j2 === j);
-        let d = V.step;
-        while (vals[i2][j2] + d === vals[i][j]) d += V.step;
-        const lc = L[nc], lr = 4 + nr;
-        const G = 'B5:' + lc + lr, RK = 'A5:A' + lr, CK = 'B4:' + lc + '4';
-        const base = Object.assign({}, S.cells, { A1: V.rl, B1: V.rows[i], A2: V.cl, B2: V.heads[j], A3: V.al });
-        const alt = H.edit(base, { B1: V.rows[i2], B2: V.heads[j2], [L[j2 + 1] + (5 + i2)]: (x) => x + d });
+      /* A rate card in another workbook is a grid: one key down column A, the other across row 4. Each line first looks
+         up what the grid needs (a region, a loan type) or what the grid value is divided by (a pack size), then reads
+         the grid with INDEX and two MATCHes. */
+      if (v === 0) {
+        const WH = H.WAREHOUSES, regs = H.REGIONS.slice();
+        const rows = H.sales(r, 14).map((s) => ({ date: s.date, d: s.distributor, wh: r.pick(WH), cartons: s.cartons }));
+        const S = H.table([{ h: 'Date', k: 'date', date: true }, { h: 'Distributor', k: 'd' }, { h: 'Warehouse', k: 'wh' }, { h: 'Cartons', k: 'cartons', num: true }], rows);
+        const MD = H.table([DC.id, DC.name, DC.city, DC.region], r.shuffle(DIST()));
+        /* Rp per carton grows with the distance from the warehouse to the region, placed roughly west to east. */
+        const WP = { 'Gudang Medan': 0, 'Gudang Bekasi': 3, 'Gudang Bandung': 4, 'Gudang Semarang': 6, 'Gudang Surabaya': 8 };
+        const RP = { Sumatera: 1, Jabodetabek: 3, 'Jawa Barat': 4, 'Jawa Tengah': 6, 'Jawa Timur': 8, 'Bali Nusra': 10, Sulawesi: 12 };
+        const TG = across('Region', WH, regs.map((h) => ({ h, vals: WH.map((w) => 2000 + 1000 * Math.abs(WP[w] - RP[h]) + r.int(0, 2) * 500) })));
+        const md = X('master_distributor.xlsx', 'Distributor', MD), g = gridRefs('tarif_kirim.xlsx', 'Tarif', TG);
+        /* The hidden test: the rate card raises the rate on row 5's route, and row 11 ships from another warehouse. */
+        const tgAlt = H.edit(TG.cells, { [L[WH.indexOf(rows[0].wh) + 1] + (5 + regs.indexOf(regionOf(rows[0].d)))]: (x) => x + 1500 });
+        const alt = H.edit(S.cells, { [S.cell('Warehouse', 6)]: WH[(WH.indexOf(rows[6].wh) + 2) % WH.length] });
+        const reg = `XLOOKUP(B5,${md.A('Distributor')},${md.A('Region')})`;
         return H.problem({
-          title: V.title, file: V.file, sheet: S, base, alt, answerCell: 'B3',
-          statement: `<p>In <b>B3</b>, return ${V.what}. Find the row with MATCH on ${RK} and the column with MATCH on ${CK}.</p>`,
-          solution: `=INDEX(${G},MATCH(B1,${RK},0),MATCH(B2,${CK},0))`,
-          alts: [`=XLOOKUP(B1,${RK},XLOOKUP(B2,${CK},${G}))`, `=VLOOKUP(B1,A5:${lc}${lr},MATCH(B2,A4:${lc}4,0),FALSE)`, `=XLOOKUP(B2,${CK},XLOOKUP(B1,${RK},${G}))`, `=INDEX(${G},XMATCH(B1,${RK}),XMATCH(B2,${CK}))`],
-          hints: ['INDEX can take a row number and a column number inside a block of cells.', `MATCH(B1, ${RK}, 0) gives the row; MATCH(B2, ${CK}, 0) gives the column.`, `Shape: =INDEX(${G}, MATCH(B1, ${RK}, 0), MATCH(B2, ${CK}, 0))`],
-          explain: `The first MATCH finds which row of the grid holds B1 and the second which column holds B2. INDEX returns the cell where that row and that column cross in ${G}.`,
-          chips: [G, RK, CK, 'MATCH(B1,', 'MATCH(B2,', ',0)'], fnKey: 'INDEX('
+          title: 'Freight per shipment from a region by warehouse rate card', file: 'pengiriman_q4.xlsx', sheetName: 'Kirim', sheet: S, base: S.cells, alt, fill: true, fillCol: 'E', ansLabel: 'Freight (Rp)',
+          books: [wb('master_distributor.xlsx', 'Distributor', MD), wb('tarif_kirim.xlsx', 'Tarif', TG, tgAlt)],
+          statement: `<p>${opens([['the shipments', 'pengiriman_q4.xlsx'], ['the distributor master', 'master_distributor.xlsx'], ['the freight rate card', 'tarif_kirim.xlsx']])} The rate card gives Rp per carton, with regions down column A and warehouses across row 4. The shipments do not show the region.</p><p>In <b>E5</b>, work out the freight of each shipment: its <b>Cartons</b> times the rate where the distributor's <b>Region</b> (from the master) meets the shipping <b>Warehouse</b>. Fill it down to <b>E${S.last}</b>.</p>`,
+          solution: `=D5*INDEX(${g.G},MATCH(${reg},${g.RK},0),MATCH(C5,${g.CK},0))`,
+          alts: [`=D5*XLOOKUP(${reg},${g.RK},XLOOKUP(C5,${g.CK},${g.G}))`, `=D5*INDEX(${g.G},MATCH(VLOOKUP(B5,${md.T('Distributor', 'Region')},3,FALSE),${g.RK},0),MATCH(C5,${g.CK},0))`,
+            `=D5*VLOOKUP(${reg},${g.ALL},MATCH(C5,${g.HEAD},0),FALSE)`, `=INDEX(${g.G},XMATCH(${reg},${g.RK}),XMATCH(C5,${g.CK}))*D5`],
+          hints: ['Look up the region first: the distributor in B5 gives its Region in master_distributor.xlsx.',
+            `Then read the grid: MATCH that region in ${g.RK} for the row, and MATCH the warehouse in C5 in ${g.CK} for the column. INDEX returns the cell where they cross.`,
+            `Shape: =D5*INDEX(${g.G}, MATCH(XLOOKUP(B5, ...), ${g.RK}, 0), MATCH(C5, ${g.CK}, 0))`],
+          explain: 'XLOOKUP turns the distributor into its region from master_distributor.xlsx. The first MATCH finds that region down the rate card, the second finds the warehouse across it, and INDEX returns the rate where they cross. Times the cartons, that is the freight. Every range in the other files is pinned with $, so filling down keeps them in place.',
+          chips: ['D5*', 'B5', 'C5', md.A('Distributor'), md.A('Region'), g.G, g.RK, g.CK, ',0)'], fnKey: 'INDEX('
         });
       }
+      if (v === 1) {
+        const facs = H.db().facilities;
+        const rows = r.sample(facs, 12).map((f) => ({ f: f.facility_id, d: f.distributor, tenor: r.pick([1, 2, 3, 5]), amt: r.pick([25, 40, 50, 75, 100, 150]) * 1000000 }));
+        const S = H.table([{ h: 'Facility', k: 'f' }, { h: 'Distributor', k: 'd' }, { h: 'Tenor (years)', k: 'tenor', num: true }, { h: 'Amount (Rp)', k: 'amt', num: true }], rows);
+        const BP = H.table([{ h: 'Facility', k: 'facility_id' }, { h: 'Distributor', k: 'distributor' }, { h: 'Type', k: 'type' }, { h: 'Limit (Rp)', k: 'limit', num: true }], r.shuffle(facs));
+        const types = ['Working Capital', 'Term Loan', 'Trade Finance', 'Investment'], ten = [1, 2, 3, 5];
+        const b0 = r.pick([8.5, 9]), add = [0, 1, -0.5, 1.5], up = [0, 0.25, 0.5, 1];
+        const RC = across('Type', ten, types.map((h, i) => ({ h, vals: ten.map((t, j) => b0 + add[i] + up[j] + r.pick([0, 0.25])) })));
+        const bp = X('buku_pinjaman.xlsx', 'Fasilitas', BP), g = gridRefs('suku_bunga.xlsx', 'Bunga', RC);
+        const typeOf = (id) => facs.find((x) => x.facility_id === id).type;
+        /* The hidden test: the rate card moves the rate for row 5's type and tenor, and row 10 gets a longer tenor. */
+        const rcAlt = H.edit(RC.cells, { [L[ten.indexOf(rows[0].tenor) + 1] + (5 + types.indexOf(typeOf(rows[0].f)))]: (x) => x + 0.25 });
+        const alt = H.edit(S.cells, { [S.cell('Tenor (years)', 5)]: ten[(ten.indexOf(rows[5].tenor) + 1) % 4] });
+        const ty = `XLOOKUP(A5,${bp.A('Facility')},${bp.A('Type')})`;
+        const wrap = (x) => '=ROUND(D5*' + x + '/100,0)';
+        return H.problem({
+          title: 'First-year interest from a loan type by tenor rate card', file: 'pencairan_kredit.xlsx', sheetName: 'Pencairan', sheet: S, base: S.cells, alt, fill: true, fillCol: 'E', ansLabel: 'Interest year 1 (Rp)',
+          books: [wb('buku_pinjaman.xlsx', 'Fasilitas', BP), wb('suku_bunga.xlsx', 'Bunga', RC, rcAlt)],
+          statement: `<p>${opens([['the new drawdowns', 'pencairan_kredit.xlsx'], ['the loan book', 'buku_pinjaman.xlsx'], ['the rate card', 'suku_bunga.xlsx']])} The rate card gives the yearly rate (%) with loan types down column A and tenors in years across row 4. The drawdowns show the facility, not its type.</p><p>In <b>E5</b>, work out the first year of interest on each drawdown: its <b>Amount (Rp)</b> times the rate for its facility's <b>Type</b> (from the loan book) and its <b>Tenor (years)</b>, divided by 100 and rounded to whole rupiah with ROUND. Fill it down to <b>E${S.last}</b>.</p>`,
+          solution: wrap(`INDEX(${g.G},MATCH(${ty},${g.RK},0),MATCH(C5,${g.CK},0))`),
+          alts: [wrap(`XLOOKUP(${ty},${g.RK},XLOOKUP(C5,${g.CK},${g.G}))`), wrap(`VLOOKUP(${ty},${g.ALL},MATCH(C5,${g.HEAD},0),FALSE)`),
+            wrap(`INDEX(${g.G},MATCH(VLOOKUP(A5,${bp.T('Facility', 'Type')},3,FALSE),${g.RK},0),MATCH(C5,${g.CK},0))`)],
+          hints: ['Two steps: the facility in A5 gives its loan Type in buku_pinjaman.xlsx, and the type with the tenor gives the rate in suku_bunga.xlsx.',
+            `The row of the rate card is MATCH(type, ${g.RK}, 0) and the column is MATCH(C5, ${g.CK}, 0). INDEX on ${g.G} reads the rate.`,
+            `Shape: =ROUND(D5*INDEX(${g.G}, MATCH(XLOOKUP(A5, ...), ${g.RK}, 0), MATCH(C5, ${g.CK}, 0))/100, 0)`],
+          explain: 'XLOOKUP brings the facility\'s loan type from the loan book. That type and the tenor are the two keys of the rate card: one MATCH finds the row, the other the column, and INDEX returns the yearly rate. Amount times rate divided by 100 is one year of interest.',
+          chips: ['D5*', 'A5', 'C5', bp.A('Facility'), bp.A('Type'), g.G, g.RK, g.CK, ',0)'], fnKey: 'INDEX('
+        });
+      }
+      if (v === 2) {
+        const months = ['May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'];
+        const reps = r.sample(H.REPS, 8), order = r.shuffle(reps);
+        const sales = {};
+        reps.forEach((n) => { sales[n] = months.map(() => r.int(40, 160) * 1000000); });
+        const SG = across('Rep', months, order.map((h) => ({ h, vals: sales[h] })));
+        const tl = r.shuffle(H.REPS).map((n) => ({ n, t: r.pick([80, 90, 100, 120, 150]) * 1000000 }));
+        const TG = H.table([{ h: 'Rep', k: 'n' }, { h: 'Monthly target (Rp)', k: 't', num: true }], tl);
+        const S = H.table([{ h: 'Rep', k: 'n' }, { h: 'Area', k: 'area' }], reps.map((n) => ({ n, area: r.pick(H.REGIONS) })));
+        const i = r.int(0, 5), j = r.pick(nums(6).filter((k) => k !== i));
+        const g = gridRefs('penjualan_rep.xlsx', 'Sales', SG), tg = X('target_sales.xlsx', 'Target', TG);
+        const base = Object.assign({}, S.cells, { A1: 'Month', B1: months[i] });
+        /* The hidden test: B1 asks for another month, one sale in that month is corrected, and one target is raised. */
+        const alt = H.edit(base, { B1: months[j] });
+        const sgAlt = H.edit(SG.cells, { [L[j + 1] + (5 + order.indexOf(reps[0]))]: (x) => x + 2500000 });
+        const tgAlt = H.edit(TG.cells, { [TG.cell('Monthly target (Rp)', tl.findIndex((x) => x.n === reps[1]))]: (x) => x + 20000000 });
+        const TR = tg.A('Rep'), TT = tg.A('Monthly target (Rp)'), targ = `XLOOKUP(A5,${TR},${TT})`;
+        return H.problem({
+          title: "Each rep's achievement in a chosen month, sales and targets apart", file: 'capaian_rep.xlsx', sheetName: 'Capaian', sheet: S, base, alt, fill: true, fillCol: 'C', ansLabel: 'Achievement', precision: 4,
+          books: [wb('penjualan_rep.xlsx', 'Sales', SG, sgAlt), wb('target_sales.xlsx', 'Target', TG, tgAlt)],
+          statement: `<p>${opens([['the rep list', 'capaian_rep.xlsx'], ['the sales by rep and month', 'penjualan_rep.xlsx'], ['the targets', 'target_sales.xlsx']])} In the sales file the reps run down column A and the months across row 4. <b>B1</b> holds the month to report.</p><p>In <b>C5</b>, work out each rep's achievement for that month: their sales in that month divided by their <b>Monthly target (Rp)</b> from the targets file, as a decimal (0.95 means 95%). Fill it down to <b>C${S.last}</b>.</p>`,
+          solution: `=INDEX(${g.G},MATCH(A5,${g.RK},0),MATCH($B$1,${g.CK},0))/${targ}`,
+          alts: [`=XLOOKUP(A5,${g.RK},XLOOKUP($B$1,${g.CK},${g.G}))/${targ}`, `=VLOOKUP(A5,${g.ALL},MATCH($B$1,${g.HEAD},0),FALSE)/VLOOKUP(A5,${tg.T('Rep', 'Monthly target (Rp)')},2,FALSE)`,
+            `=INDEX(${g.G},XMATCH(A5,${g.RK}),XMATCH($B$1,${g.CK}))/INDEX(${TT},MATCH(A5,${TR},0))`],
+          hints: ['The sale is a two-way lookup: the rep in A5 picks the row of the sales grid, the month in B1 picks the column. The target is a plain lookup in the other file.',
+            'B1 must stay put as the formula fills down, so write it as $B$1. The ranges in the other workbooks are pinned already.',
+            `Shape: =INDEX(${g.G}, MATCH(A5, ${g.RK}, 0), MATCH($B$1, ${g.CK}, 0)) / XLOOKUP(A5, ${TR}, ${TT})`],
+          explain: 'INDEX with two MATCHes reads the rep\'s sales for the month in B1 from penjualan_rep.xlsx; XLOOKUP brings the same rep\'s target from target_sales.xlsx. Sales over target is the achievement. Change B1 and every row follows.',
+          chips: ['A5', '$B$1', g.G, g.RK, g.CK, TR, TT, ',0)'], fnKey: 'INDEX('
+        });
+      }
+      const CH = ['Wholesale', 'Modern trade', 'Warung'];
       const ps = r.shuffle(H.PRODUCTS);
-      const rows = ps.map((p) => ({ sku: p.sku, packs: p.packs_per_carton, w: p.carton_price, m: Math.round(p.carton_price * 1.08 / 1000) * 1000, k: Math.round(p.carton_price * 1.15 / 1000) * 1000 }));
-      const S = H.table([{ h: 'SKU', k: 'sku' }, { h: 'Packs per carton', k: 'packs', num: true }, { h: 'Wholesale', k: 'w', num: true }, { h: 'Modern trade', k: 'm', num: true }, { h: 'Warung', k: 'k', num: true }], rows);
-      const ch = ['Wholesale', 'Modern trade', 'Warung'], ck = ['w', 'm', 'k'];
-      const i = r.int(1, 11), j = r.int(0, 2);
-      let i2, j2;
-      do { i2 = r.int(0, 11); j2 = r.int(0, 2); } while (i2 === i || j2 === j);
-      const per = (a, b, d) => Math.round((rows[a][ck[b]] + d) / rows[a].packs);
-      let d = 12000;
-      while (per(i2, j2, d) === per(i, j, 0)) d += 6000;
-      const base = Object.assign({}, S.cells, { A1: 'SKU', B1: rows[i].sku, A2: 'Channel', B2: ch[j], A3: 'Price per pack (Rp)' });
-      const alt = H.edit(base, { B1: rows[i2].sku, B2: ch[j2], [L[j2 + 2] + (5 + i2)]: (x) => x + d });
+      const HK = across('SKU', CH, ps.map((x) => ({ h: x.sku, vals: [x.carton_price, Math.round(x.carton_price * 1.08 / 1000) * 1000, Math.round(x.carton_price * 1.15 / 1000) * 1000] })));
+      const pl = r.shuffle(H.PRODUCTS);
+      const PM = H.table([{ h: 'SKU', k: 'sku' }, { h: 'Product', k: 'name' }, { h: 'Category', k: 'category' }, { h: 'Packs per carton', k: 'packs_per_carton', num: true }], pl);
+      const rows = H.sales(r, 14).map((s) => ({ inv: s.invoice, ch: r.pick(CH), sku: s.sku, packs: r.int(2, 20) * 6 }));
+      const S = H.table([{ h: 'Invoice', k: 'inv' }, { h: 'Channel', k: 'ch' }, { h: 'SKU', k: 'sku' }, { h: 'Packs', k: 'packs', num: true }], rows);
+      const g = gridRefs('harga_kanal.xlsx', 'Harga', HK), pm = X('master_produk.xlsx', 'Produk', PM);
+      /* The hidden test: one channel price goes up, one SKU gets a bigger carton in the product master, and row 9 sells
+         through another channel. */
+      const hkAlt = H.edit(HK.cells, { [L[CH.indexOf(rows[0].ch) + 1] + (5 + ps.findIndex((x) => x.sku === rows[0].sku))]: (x) => x + 12000 });
+      const pmAlt = H.edit(PM.cells, { [PM.cell('Packs per carton', pl.findIndex((x) => x.sku === rows[2].sku))]: (x) => x + 8 });
+      const alt = H.edit(S.cells, { [S.cell('Channel', 4)]: CH[(CH.indexOf(rows[4].ch) + 1) % 3] });
+      const price = `INDEX(${g.G},MATCH(C5,${g.RK},0),MATCH(B5,${g.CK},0))`, PS = pm.A('SKU'), PP = pm.A('Packs per carton'), packs = `XLOOKUP(C5,${PS},${PP})`;
       return H.problem({
-        title: 'Price per pack by SKU and sales channel', file: 'harga_per_kanal.xlsx', sheet: S, base, alt, answerCell: 'B3',
-        statement: '<p>Columns C to E hold the carton price (Rp) for each sales channel. In <b>B3</b>, return the price of one pack of the SKU in <b>B1</b> in the channel in <b>B2</b>: its carton price for that channel divided by its <b>Packs per carton</b>, rounded to whole rupiah with ROUND.</p>',
-        solution: '=ROUND(INDEX(C5:E16,MATCH(B1,A5:A16,0),MATCH(B2,C4:E4,0))/XLOOKUP(B1,A5:A16,B5:B16),0)',
-        alts: ['=ROUND(XLOOKUP(B1,A5:A16,XLOOKUP(B2,C4:E4,C5:E16))/XLOOKUP(B1,A5:A16,B5:B16),0)', '=ROUND(VLOOKUP(B1,A5:E16,MATCH(B2,A4:E4,0),FALSE)/VLOOKUP(B1,A5:E16,2,FALSE),0)', '=ROUND(INDEX(C5:E16,MATCH(B1,A5:A16,0),MATCH(B2,C4:E4,0))/INDEX(B5:B16,MATCH(B1,A5:A16,0)),0)'],
-        hints: ['Two lookups: a two-way one for the carton price (SKU down, channel across) and a plain one for the packs per carton.', 'INDEX(C5:E16, MATCH(B1, A5:A16, 0), MATCH(B2, C4:E4, 0)) is the carton price; XLOOKUP(B1, A5:A16, B5:B16) is the packs.', 'Shape: =ROUND(INDEX(C5:E16, row, column) / XLOOKUP(B1, A5:A16, B5:B16), 0)'],
-        explain: 'INDEX with two MATCHes picks the carton price where the SKU row meets the channel column. Dividing by the SKU\'s packs per carton, found with XLOOKUP, and rounding gives the price of one pack.',
-        chips: ['C5:E16', 'A5:A16', 'C4:E4', 'B5:B16', ',0)'], fnKey: 'INDEX('
+        title: 'Pack order value from a channel price grid and the carton size', file: 'pesanan_kanal.xlsx', sheetName: 'Pesanan', sheet: S, base: S.cells, alt, fill: true, fillCol: 'E', ansLabel: 'Value (Rp)',
+        books: [wb('harga_kanal.xlsx', 'Harga', HK, hkAlt), wb('master_produk.xlsx', 'Produk', PM, pmAlt)],
+        statement: `<p>${opens([['the orders in packs', 'pesanan_kanal.xlsx'], ['the carton prices by channel', 'harga_kanal.xlsx'], ['the product master', 'master_produk.xlsx']])} The price grid is per carton, with SKUs down column A and sales channels across row 4. These orders are counted in packs, not cartons, whatever the channel.</p><p>In <b>E5</b>, work out the value of each order: its <b>Packs</b> times the carton price for its <b>SKU</b> and <b>Channel</b>, divided by the SKU's <b>Packs per carton</b> from the product master, rounded to whole rupiah with ROUND. Fill it down to <b>E${S.last}</b>.</p>`,
+        solution: `=ROUND(D5*${price}/${packs},0)`,
+        alts: [`=ROUND(D5*XLOOKUP(C5,${g.RK},XLOOKUP(B5,${g.CK},${g.G}))/${packs},0)`, `=ROUND(D5*VLOOKUP(C5,${g.ALL},MATCH(B5,${g.HEAD},0),FALSE)/VLOOKUP(C5,${pm.T('SKU', 'Packs per carton')},4,FALSE),0)`,
+          `=ROUND(${price}*D5/${packs},0)`],
+        hints: ['Two lookups in two files: a two-way one for the carton price (SKU down, channel across) and a plain one for the packs per carton.',
+          `${price.replace(/,/g, ', ')} is the carton price; XLOOKUP(C5, ${PS}, ${PP}) is the packs per carton.`,
+          'Shape: =ROUND(D5 * carton price / packs per carton, 0)'],
+        explain: 'INDEX with two MATCHes picks the carton price where the SKU row meets the channel column in harga_kanal.xlsx. Divided by the packs per carton from master_produk.xlsx, that is the price of one pack; times the packs ordered and rounded, it is the order value.',
+        chips: ['D5*', 'B5', 'C5', g.G, g.RK, g.CK, PS, PP, ',0)'], fnKey: 'INDEX('
       });
     }
   });
 
   P.add({
-    key: 'tier-from-thresholds', difficulty: 'Hard', level: 8, topics: ['VLOOKUP', 'XLOOKUP', 'approximate match'], count: 4,
+    key: 'tier-from-thresholds', difficulty: 'Hard', level: 8, topics: ['VLOOKUP', 'XLOOKUP', 'approximate match', 'Several workbooks'], count: 4, multi: true,
     make(r, v) {
-      /* A tier table sorted by its lower limits: an approximate match returns the tier the value falls in. */
-      const V = [
-        { title: 'Volume discount from a carton tier table', file: 'diskon_volume.xlsx', ans: 'Discount (%)', q: 'Cartons',
-          main: [{ h: 'Date', k: 'date', date: true }, { h: 'Distributor', k: 'distributor' }, { h: 'SKU', k: 'sku' }, { h: 'Cartons', k: 'cartons', num: true }], rows: () => H.sales(r, 14),
-          side: ['From cartons', 'Discount (%)'], tiers: () => { const t = r.pick([[0, 20, 40, 60], [0, 15, 30, 50], [0, 25, 45, 70]]), dd = r.pick([[0, 2, 3.5, 5], [0, 1.5, 3, 4.5], [0, 2.5, 4, 6]]); return t.map((f, k) => [f, dd[k]]); }, bump: 0.5,
-          rule: 'the <b>Discount (%)</b> for the line\'s <b>Cartons</b>, as the table shows it (2.5 means 2.5%): a line gets the rate of the highest <b>From cartons</b> it reaches (at least that many cartons)' },
-        { title: 'Kol grade from a days-past-due tier table', file: 'kolektibilitas.xlsx', ans: 'Kol', q: 'DPD',
-          main: [{ h: 'Facility', k: 'facility' }, { h: 'Distributor', k: 'distributor' }, { h: 'Outstanding (Rp)', k: 'outstanding', num: true }, { h: 'DPD', k: 'dpd', num: true }], rows: () => H.loans(r, 14),
-          side: ['From DPD', 'Kol'], tiers: () => [[0, 1], [1, 2], [91, 3], [121, 4], [181, 5]],
-          rule: 'the collectibility grade (Kol) for the facility\'s <b>DPD</b> (days past due): 0 days is Kol 1, 1 to 90 is Kol 2, 91 to 120 Kol 3, 121 to 180 Kol 4 and more than 180 Kol 5, as the table lists' },
-        { title: 'Rep commission from an achievement tier table', file: 'komisi_sales.xlsx', ans: 'Commission (Rp)', ratio: true,
-          main: [{ h: 'Rep', k: 'name' }, { h: 'Area', k: 'area' }, { h: 'Target (Rp)', k: 'target', num: true }, { h: 'Actual (Rp)', k: 'actual', num: true }], rows: () => H.reps(r, 10),
-          side: ['From achievement', 'Commission (%)'], tiers: () => { const c = r.pick([[0, 0.5, 1, 1.5], [0, 1, 1.5, 2.5], [0, 0.75, 1.25, 2]]); return [0, 0.8, 1, 1.1].map((f, k) => [f, c[k]]); }, bump: 0.25,
-          rule: 'the commission in rupiah: <b>Actual (Rp)</b> times the commission rate for the rep\'s achievement (Actual divided by Target), divided by 100 and rounded to whole rupiah. A rep gets the rate of the highest <b>From achievement</b> reached' },
-        { title: 'Aging bucket from a days-overdue tier table', file: 'umur_piutang.xlsx', ans: 'Bucket', q: 'Days overdue',
-          main: [{ h: 'Invoice', k: 'ref' }, { h: 'Distributor', k: 'distributor' }, { h: 'Amount (Rp)', k: 'amount', num: true }, { h: 'Days overdue', k: 'over', num: true }],
-          rows: () => H.invoices(r, 14).map((x) => Object.assign(x, { over: r.pick([0, 0, 4, 12, 25, 30, 31, 44, 60, 61, 77, 90, 91, 130]) })),
-          side: ['From days', 'Bucket'], tiers: () => [[0, 'Current'], [1, '1 to 30'], [31, '31 to 60'], [61, '61 to 90'], [91, 'Over 90']],
-          rule: 'the aging bucket for the invoice\'s <b>Days overdue</b>, from the tier table: an invoice falls in the bucket of the highest <b>From days</b> it reaches' }
-      ][v];
-      const rows = V.rows(), tiers = V.tiers();
-      const S = H.table(V.main, rows);
-      const M = H.table([{ h: V.side[0], v: (t) => t[0], num: true }, { h: V.side[1], v: (t) => t[1], num: typeof tiers[0][1] === 'number' }], tiers, { startCol: 6 });
-      const B = board([S, M]);
-      const tierOf = (x) => { let k = 0; tiers.forEach((t, m) => { if (x >= t[0]) k = m; }); return k; };
-      const qOf = (k) => (V.ratio ? rows[k].actual / rows[k].target : rows[k][V.main[3].k]);
-      /* The hidden sheet: row 1 sits exactly on a tier's lower limit, in a different tier than before. */
-      const t0 = tierOf(qOf(0));
-      const t = r.pick(nums(tiers.length).filter((m) => m > 0 && m !== t0));
-      const e = {};
-      if (V.ratio) e[S.cell('Actual (Rp)', 0)] = Math.round(rows[0].target * tiers[t][0] * 100) / 100;
-      else e[S.cell(V.q, 0)] = tiers[t][0];
-      if (V.bump) e[M.cell(V.side[1], tiers.length - 1)] = (x) => x + V.bump;
-      const alt = H.edit(B.cells, e);
-      const KA = M.A(V.side[0]), VA = M.A(V.side[1]), TA = '$G$5:$H$' + M.last;
-      const x = V.ratio ? 'D5/C5' : 'D5';
-      const wrap = (f) => (V.ratio ? '=ROUND(D5*' + f + '/100,0)' : '=' + f);
-      return build(B, {
-        title: V.title, file: V.file, base: B.cells, alt, fill: true, fillCol: 'E', ansLabel: V.ans,
-        statement: `<p>In <b>E5</b>, return ${V.rule}. The tier table in <b>G5:H${M.last}</b> is sorted by its lower limits, smallest first. Fill it down to <b>E${S.last}</b>.</p>`,
-        solution: wrap(`VLOOKUP(${x},${TA},2,TRUE)`),
-        alts: [wrap(`XLOOKUP(${x},${KA},${VA},,-1)`), wrap(`LOOKUP(${x},${KA},${VA})`), wrap(`INDEX(${VA},MATCH(${x},${KA},1))`), wrap(`VLOOKUP(${x},${TA},2)`)],
-        hints: ['An exact match fails here: most values are not in the table. You want the last lower limit that the value reaches.',
-          `VLOOKUP with TRUE as its last part does that on a table sorted smallest first; so does XLOOKUP with match_mode -1 (exact or next smaller). Pin the tier table: ${TA}.`,
-          `Shape: ${wrap('VLOOKUP(' + x + ', ' + TA + ', 2, TRUE)')}`],
-        explain: `With TRUE, VLOOKUP walks down the sorted lower limits and stops at the largest one that is not above ${x}, so a value exactly on a limit gets that tier. XLOOKUP with match_mode -1 gives the same tier without needing the sort.`,
-        chips: [x, TA, KA, VA, ',2,TRUE)', ',,-1)'], fnKey: 'VLOOKUP('
+      /* A tier table in another workbook, sorted by its lower limits: an approximate match returns the tier a value
+         falls in. A second lookup, in a third workbook, brings what the tier is applied to or measured against. */
+      if (v === 0) {
+        const rows = H.sales(r, 14);
+        const S = H.table([{ h: 'Date', k: 'date', date: true }, { h: 'Distributor', k: 'distributor' }, { h: 'SKU', k: 'sku' }, { h: 'Cartons', k: 'cartons', num: true }], rows);
+        const pl = r.shuffle(H.PRODUCTS);
+        const PM = H.table([{ h: 'SKU', k: 'sku' }, { h: 'Product', k: 'name' }, { h: 'Carton price (Rp)', k: 'carton_price', num: true }], pl);
+        const lo = r.pick([[0, 20, 40, 60], [0, 15, 30, 50], [0, 25, 45, 70]]), dd = r.pick([[0, 2, 3.5, 5], [0, 1.5, 3, 4.5], [0, 2.5, 4, 6]]);
+        const DV = H.table([{ h: 'From cartons', k: 'f', num: true }, { h: 'Discount (%)', k: 'd', num: true }], lo.map((f, k) => ({ f, d: dd[k] })));
+        /* The hidden test: row 5 sits exactly on another tier's lower limit, the top tier gets deeper, and one price rises. */
+        const t0 = tierAt(lo, rows[0].cartons), tt = r.pick(nums(4).filter((m) => m > 0 && m !== t0));
+        const alt = H.edit(S.cells, { [S.cell('Cartons', 0)]: lo[tt] });
+        const dvAlt = H.edit(DV.cells, { [DV.cell('Discount (%)', 3)]: (x) => x + 0.5 });
+        const pmAlt = H.edit(PM.cells, { [PM.cell('Carton price (Rp)', pl.findIndex((x) => x.sku === rows[5].sku))]: (x) => x + 4000 });
+        const pm = X('master_produk.xlsx', 'Produk', PM), dv = X('diskon_volume.xlsx', 'Diskon', DV);
+        const PS = pm.A('SKU'), PP = pm.A('Carton price (Rp)'), DF = dv.A('From cartons'), DD = dv.A('Discount (%)'), DT = dv.T('From cartons', 'Discount (%)');
+        const price = `XLOOKUP(C5,${PS},${PP})`;
+        const wrap = (p, d) => `=ROUND(D5*${p}*(1-${d}/100),0)`;
+        return H.problem({
+          title: 'Net order value after a volume discount tier from another file', file: 'pesanan_q4.xlsx', sheetName: 'Pesanan', sheet: S, base: S.cells, alt, fill: true, fillCol: 'E', ansLabel: 'Net (Rp)',
+          books: [wb('master_produk.xlsx', 'Produk', PM, pmAlt), wb('diskon_volume.xlsx', 'Diskon', DV, dvAlt)],
+          statement: `<p>${opens([['the order lines', 'pesanan_q4.xlsx'], ['the product master', 'master_produk.xlsx'], ['the volume discount table', 'diskon_volume.xlsx']])} The discount table lists the lowest cartons of each tier, smallest first; a line gets the <b>Discount (%)</b> of the highest <b>From cartons</b> it reaches.</p><p>In <b>E5</b>, work out the net value of each line: its <b>Cartons</b> times the SKU's <b>Carton price (Rp)</b> from the master, times (1 minus its discount divided by 100), rounded to whole rupiah with ROUND. Fill it down to <b>E${S.last}</b>.</p>`,
+          solution: wrap(price, `VLOOKUP(D5,${DT},2,TRUE)`),
+          alts: [wrap(price, `XLOOKUP(D5,${DF},${DD},,-1)`), wrap(`VLOOKUP(C5,${pm.T('SKU', 'Carton price (Rp)')},3,FALSE)`, `VLOOKUP(D5,${DT},2,TRUE)`),
+            wrap(`INDEX(${PP},MATCH(C5,${PS},0))`, `INDEX(${DD},MATCH(D5,${DF},1))`), wrap(price, `LOOKUP(D5,${DF},${DD})`)],
+          hints: ['Two lookups: an exact one for the price (by SKU, in master_produk.xlsx) and an approximate one for the discount (by cartons, in diskon_volume.xlsx).',
+            `Most carton counts are not in the tier table. VLOOKUP with TRUE, or XLOOKUP with match_mode -1, returns the tier of the last lower limit reached: VLOOKUP(D5, ${DT}, 2, TRUE).`,
+            `Shape: =ROUND(D5 * XLOOKUP(C5, ${PS}, ${PP}) * (1 - VLOOKUP(D5, ${DT}, 2, TRUE)/100), 0)`],
+          explain: 'XLOOKUP brings the carton price from the product master. VLOOKUP with TRUE walks down the sorted lower limits in the discount file and stops at the largest one not above the cartons, so a line exactly on a limit gets that tier. Cartons times price, less the discount, is the net value.',
+          chips: ['D5*', 'C5', 'D5', PS, PP, DT, DF, DD, ',2,TRUE)', ',,-1)'], fnKey: 'VLOOKUP('
+        });
+      }
+      if (v === 1) {
+        const rows = H.loans(r, 14);
+        const S = H.table([{ h: 'Facility', k: 'facility' }, { h: 'Distributor', k: 'distributor' }, { h: 'Outstanding (Rp)', k: 'outstanding', num: true }, { h: 'DPD', k: 'dpd', num: true }], rows);
+        const lo = [0, 1, 91, 121, 181];
+        const KT = H.table([{ h: 'From DPD', k: 'f', num: true }, { h: 'Kol', k: 'k', num: true }], lo.map((f, k) => ({ f, k: k + 1 })));
+        const CD = H.table([{ h: 'Kol', k: 'k', num: true }, { h: 'Provision (%)', k: 'p', num: true }], [1, 5, 15, 50, 100].map((p, k) => ({ k: k + 1, p })));
+        /* The hidden test: row 5's DPD moves to exactly another grade's lower limit, and the provision for Kol 2 doubles. */
+        const t0 = tierAt(lo, rows[0].dpd), tt = r.pick(nums(5).filter((m) => m > 0 && m !== t0));
+        const alt = H.edit(S.cells, { [S.cell('DPD', 0)]: lo[tt] });
+        const cdAlt = H.edit(CD.cells, { [CD.cell('Provision (%)', 1)]: 10 });
+        const kt = X('kebijakan_kol.xlsx', 'Kol', KT), cd = X('cadangan.xlsx', 'Cadangan', CD);
+        const KF = kt.A('From DPD'), KK = kt.A('Kol'), KTT = kt.T('From DPD', 'Kol'), CK = cd.A('Kol'), CP = cd.A('Provision (%)');
+        const kol = `VLOOKUP(D5,${KTT},2,TRUE)`;
+        const wrap = (x) => `=ROUND(C5*${x}/100,0)`;
+        return H.problem({
+          title: 'Loan loss provision from Kol tiers and a provision table', file: 'buku_pinjaman.xlsx', sheetName: 'Pinjaman', sheet: S, base: S.cells, alt, fill: true, fillCol: 'E', ansLabel: 'Provision (Rp)',
+          books: [wb('kebijakan_kol.xlsx', 'Kol', KT), wb('cadangan.xlsx', 'Cadangan', CD, cdAlt)],
+          statement: `<p>${opens([['the loan book', 'buku_pinjaman.xlsx'], ['the Kol policy', 'kebijakan_kol.xlsx'], ['the provision table', 'cadangan.xlsx']])} The Kol policy lists the lowest DPD (days past due) of each collectibility grade, smallest first; a facility gets the grade of the highest <b>From DPD</b> it reaches. The provision table gives the <b>Provision (%)</b> for each grade.</p><p>In <b>E5</b>, work out each facility's provision: its <b>Outstanding (Rp)</b> times the provision % of its grade, divided by 100 and rounded to whole rupiah with ROUND. Fill it down to <b>E${S.last}</b>.</p>`,
+          solution: wrap(`XLOOKUP(${kol},${CK},${CP})`),
+          alts: [wrap(`INDEX(${CP},${kol})`), wrap(`VLOOKUP(XLOOKUP(D5,${KF},${KK},,-1),${cd.T('Kol', 'Provision (%)')},2,FALSE)`), wrap(`XLOOKUP(LOOKUP(D5,${KF},${KK}),${CK},${CP})`)],
+          hints: ['Work from the inside out: the DPD in D5 gives a Kol grade (approximate, from the policy file), and the grade gives a provision % (exact, from the provision table).',
+            `${kol.replace(/,/g, ', ')} is the grade. Use it as the value to find in ${CK}.`,
+            `Shape: =ROUND(C5 * XLOOKUP(VLOOKUP(D5, ${KTT}, 2, TRUE), ${CK}, ${CP}) / 100, 0)`],
+          explain: 'VLOOKUP with TRUE turns the DPD into a Kol grade: the last lower limit it reaches in kebijakan_kol.xlsx. XLOOKUP then finds that grade in cadangan.xlsx and returns its provision %. Outstanding times that %, divided by 100, is the provision the bank sets aside.',
+          chips: ['C5*', 'D5', KTT, KF, KK, CK, CP, ',2,TRUE)'], fnKey: 'XLOOKUP('
+        });
+      }
+      if (v === 2) {
+        const rows = H.reps(r, 10);
+        const S = H.table([{ h: 'Rep', k: 'name' }, { h: 'Area', k: 'area' }, { h: 'Actual (Rp)', k: 'actual', num: true }], rows);
+        const tl = r.shuffle(rows).map((x) => ({ n: x.name, t: x.target }));
+        const TG = H.table([{ h: 'Rep', k: 'n' }, { h: 'Target (Rp)', k: 't', num: true }], tl);
+        const c = r.pick([[0, 0.5, 1, 1.5], [0, 1, 1.5, 2.5], [0, 0.75, 1.25, 2]]), lo = [0, 0.8, 1, 1.1];
+        const SK = H.table([{ h: 'From achievement', k: 'f', num: true }, { h: 'Commission (%)', k: 'c', num: true }], lo.map((f, k) => ({ f, c: c[k] })));
+        /* The hidden test: row 5's actual lands exactly on another tier's lower limit, the top rate rises, and one target
+           is revised. */
+        const t0 = tierAt(lo, rows[0].actual / rows[0].target), tt = r.pick(nums(4).filter((m) => m > 0 && m !== t0));
+        const alt = H.edit(S.cells, { [S.cell('Actual (Rp)', 0)]: Math.round(rows[0].target * lo[tt] * 100) / 100 });
+        const skAlt = H.edit(SK.cells, { [SK.cell('Commission (%)', 3)]: (x) => x + 0.25 });
+        const tgAlt = H.edit(TG.cells, { [TG.cell('Target (Rp)', tl.findIndex((x) => x.n === rows[4].name))]: (x) => x - 20000000 });
+        const tg = X('target_sales.xlsx', 'Target', TG), sk = X('skema_komisi.xlsx', 'Komisi', SK);
+        const TR = tg.A('Rep'), TT = tg.A('Target (Rp)'), SF = sk.A('From achievement'), SC = sk.A('Commission (%)'), ST = sk.T('From achievement', 'Commission (%)');
+        const ach = `C5/XLOOKUP(A5,${TR},${TT})`;
+        const wrap = (x) => `=ROUND(C5*${x}/100,0)`;
+        return H.problem({
+          title: 'Rep commission from achievement tiers, targets in another file', file: 'komisi_q4.xlsx', sheetName: 'Realisasi', sheet: S, base: S.cells, alt, fill: true, fillCol: 'D', ansLabel: 'Commission (Rp)',
+          books: [wb('target_sales.xlsx', 'Target', TG, tgAlt), wb('skema_komisi.xlsx', 'Komisi', SK, skAlt)],
+          statement: `<p>${opens([['the actual sales', 'komisi_q4.xlsx'], ['the targets', 'target_sales.xlsx'], ['the commission scheme', 'skema_komisi.xlsx']])} The scheme lists the lowest achievement (Actual divided by Target) of each tier, smallest first; a rep gets the <b>Commission (%)</b> of the highest <b>From achievement</b> reached.</p><p>In <b>D5</b>, work out each rep's commission: <b>Actual (Rp)</b> times the commission % for their achievement, divided by 100 and rounded to whole rupiah with ROUND. The target is in the targets file. Fill it down to <b>D${S.last}</b>.</p>`,
+          solution: wrap(`VLOOKUP(${ach},${ST},2,TRUE)`),
+          alts: [wrap(`XLOOKUP(${ach},${SF},${SC},,-1)`), wrap(`INDEX(${SC},MATCH(C5/VLOOKUP(A5,${tg.T('Rep', 'Target (Rp)')},2,FALSE),${SF},1))`), wrap(`LOOKUP(${ach},${SF},${SC})`)],
+          hints: ['The achievement is not on the sheet: Actual in C5 divided by the target that XLOOKUP brings from target_sales.xlsx.',
+            `That ratio is the value to find in the scheme, with an approximate match: VLOOKUP(ratio, ${ST}, 2, TRUE).`,
+            `Shape: =ROUND(C5 * VLOOKUP(C5/XLOOKUP(A5, ${TR}, ${TT}), ${ST}, 2, TRUE) / 100, 0)`],
+          explain: 'XLOOKUP brings the rep\'s target, and C5 divided by it is the achievement. VLOOKUP with TRUE finds the last lower limit that achievement reaches in skema_komisi.xlsx, so exactly 100% earns the 100% tier. Actual times that rate, divided by 100, is the commission.',
+          chips: ['C5*', 'C5/', 'A5', TR, TT, ST, SF, SC, ',2,TRUE)'], fnKey: 'VLOOKUP('
+        });
+      }
+      const asOf = H.toSerial('2026-12-31');
+      const over = r.shuffle([-20, -5, 0, 6, 18, 27, 34, 47, 58, 66, 79, 88, 102, 135]);
+      const inv = H.invoices(r, 14).map((x, k) => ({ ref: x.ref, d: x.distributor, date: asOf - DIST().find((y) => y.name === x.distributor).terms_days - over[k], amount: x.amount }));
+      const S = H.table([{ h: 'Invoice', k: 'ref' }, { h: 'Distributor', k: 'd' }, { h: 'Invoice date', k: 'date', date: true }, { h: 'Amount (Rp)', k: 'amount', num: true }], inv);
+      const dl = r.shuffle(DIST());
+      const MD = H.table([DC.id, DC.name, DC.city, DC.terms], dl);
+      const lo = [0, 1, 31, 61, 91];
+      const AG = H.table([{ h: 'From days', k: 'f', num: true }, { h: 'Bucket', k: 'b' }, { h: 'Allowance (%)', k: 'a', num: true }],
+        lo.map((f, k) => ({ f, b: ['Current', '1 to 30', '31 to 60', '61 to 90', 'Over 90'][k], a: [0, 1, 5, 20, 50][k] })));
+      const base = Object.assign({}, S.cells, { A1: 'As of', B1: asOf });
+      /* The hidden test: the policy raises two allowances, and the distributor of an invoice 1 to 90 days overdue gets
+         30 more days of terms in the master, so that invoice drops to an earlier bucket. */
+      const agAlt = H.edit(AG.cells, { [AG.cell('Allowance (%)', 1)]: 2, [AG.cell('Allowance (%)', 3)]: 25 });
+      const late = Math.max(0, over.findIndex((o) => o >= 1 && o <= 90));
+      const mdAlt = H.edit(MD.cells, { [MD.cell('Terms (days)', dl.findIndex((d) => d.name === inv[late].d))]: (x) => x + 30 });
+      const md = X('master_distributor.xlsx', 'Distributor', MD), ag = X('kebijakan_piutang.xlsx', 'Aging', AG);
+      const MN = md.A('Distributor'), MT = md.A('Terms (days)'), AF = ag.A('From days'), AA = ag.A('Allowance (%)'), AT = ag.T('From days', 'Allowance (%)');
+      const days = `MAX(0,$B$1-C5-XLOOKUP(B5,${MN},${MT}))`;
+      const wrap = (x) => `=ROUND(D5*${x}/100,0)`;
+      return H.problem({
+        title: 'Bad-debt allowance from aging tiers and distributor terms', file: 'piutang_q4.xlsx', sheetName: 'Piutang', sheet: S, base, alt: base, fill: true, fillCol: 'E', ansLabel: 'Allowance (Rp)', dateCells: ['B1'],
+        books: [wb('master_distributor.xlsx', 'Distributor', MD, mdAlt), wb('kebijakan_piutang.xlsx', 'Aging', AG, agAlt)],
+        statement: `<p>${opens([['the open invoices', 'piutang_q4.xlsx'], ['the distributor master', 'master_distributor.xlsx'], ['the credit policy', 'kebijakan_piutang.xlsx']])} <b>B1</b> holds the as-of date. The policy's aging table lists the lowest days overdue of each bucket, smallest first.</p><p>In <b>E5</b>, work out the allowance for each invoice. Its days overdue are B1 minus the <b>Invoice date</b> minus the distributor's <b>Terms (days)</b> from the master; below 0 the invoice is not due yet, so count it as 0 with MAX. The invoice gets the <b>Allowance (%)</b> of the highest <b>From days</b> it reaches. Allowance = <b>Amount (Rp)</b> times that % divided by 100, rounded to whole rupiah with ROUND. Fill it down to <b>E${S.last}</b>.</p>`,
+        solution: wrap(`VLOOKUP(${days},${AT},3,TRUE)`),
+        alts: [wrap(`XLOOKUP(${days},${AF},${AA},,-1)`), wrap(`INDEX(${AA},MATCH(${days},${AF},1))`), wrap(`LOOKUP(${days},${AF},${AA})`),
+          wrap(`VLOOKUP(MAX(0,$B$1-(C5+VLOOKUP(B5,${md.T('Distributor', 'Terms (days)')},3,FALSE))),${AT},3,TRUE)`)],
+        hints: ['First the days overdue: $B$1 - C5 - the terms that XLOOKUP brings from master_distributor.xlsx. MAX(0, ...) turns a not-yet-due invoice into 0.',
+          `Then an approximate match on those days in the aging table: VLOOKUP(days, ${AT}, 3, TRUE) returns the Allowance (%), the third column.`,
+          `Shape: =ROUND(D5 * VLOOKUP(MAX(0, $B$1 - C5 - XLOOKUP(B5, ${MN}, ${MT})), ${AT}, 3, TRUE) / 100, 0)`],
+        explain: 'XLOOKUP brings each distributor\'s payment terms from the master, so the invoice date plus the terms is its due date and B1 minus that is the days overdue, never below 0. VLOOKUP with TRUE puts those days in an aging bucket from the policy file and returns its allowance %. Amount times that %, divided by 100, is the allowance.',
+        chips: ['D5*', '$B$1', 'C5', 'B5', MN, MT, AT, AF, AA, ',3,TRUE)', 'MAX(0,'], fnKey: 'VLOOKUP('
       });
     }
   });
 
   P.add({
-    key: 'lookup-on-two-conditions', difficulty: 'Hard', level: 10, topics: ['XLOOKUP', 'INDEX', 'MATCH'], count: 3,
+    key: 'lookup-on-two-conditions', difficulty: 'Hard', level: 10, topics: ['XLOOKUP', 'INDEX', 'MATCH', 'Several workbooks'], count: 3, multi: true,
     make(r, v) {
-      /* No single column is unique: the row is found by two keys at once, multiplied as 1s and 0s. */
-      let rows, S, c1, c2, out, l1, l2, la, title, file, what, text = false, ansDate = false;
+      /* In the other workbook no single column is unique: the row is found by two keys at once, multiplied as 1s and 0s.
+         A second lookup in a third workbook brings the figure the result is multiplied by, or one of the keys. */
       if (v === 0) {
         const skus = r.sample(H.PRODUCTS, 5), whs = r.sample(H.WAREHOUSES, 3);
-        rows = [];
-        skus.forEach((p) => whs.forEach((w) => rows.push({ sku: p.sku, wh: w, oh: r.int(1, 40) * 10, rp: r.pick([80, 100, 120, 150]) })));
-        rows = r.shuffle(rows);
-        S = H.table([{ h: 'SKU', k: 'sku' }, { h: 'Warehouse', k: 'wh' }, { h: 'On hand', k: 'oh', num: true }, { h: 'Reorder point', k: 'rp', num: true }], rows);
-        c1 = 'SKU'; c2 = 'Warehouse'; out = 'On hand'; l1 = 'SKU'; l2 = 'Warehouse'; la = 'On hand'; file = 'stok_per_gudang.xlsx';
-        title = 'On hand for one SKU in one warehouse (two conditions)'; what = 'the <b>On hand</b> for the SKU in <b>B1</b> in the warehouse in <b>B2</b>';
-      } else if (v === 1) {
-        rows = r.shuffle(H.db().facilities);
-        S = H.table([{ h: 'Facility', k: 'facility_id' }, { h: 'Distributor', k: 'distributor' }, { h: 'Type', k: 'type' }, { h: 'Limit (Rp)', k: 'limit', num: true }, { h: 'Outstanding (Rp)', k: 'outstanding', num: true }], rows);
-        c1 = 'Distributor'; c2 = 'Type'; out = 'Facility'; l1 = 'Borrower'; l2 = 'Loan type'; la = 'Facility'; text = true; file = 'buku_pinjaman.xlsx';
-        title = 'Facility code for a borrower and loan type'; what = 'the <b>Facility</b> code of the borrower in <b>B1</b> for the loan type in <b>B2</b>';
-      } else {
-        const reg = r.pick(H.REGIONS);
-        const seen = new Set();
-        rows = H.sales(r, 40, { region: reg }).filter((s) => { const k = s.distributor + '|' + s.sku; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 14);
-        S = H.table([{ h: 'Date', k: 'date', date: true }, { h: 'Invoice', k: 'invoice' }, { h: 'Distributor', k: 'distributor' }, { h: 'SKU', k: 'sku' }, { h: 'Net (Rp)', k: 'net', num: true }], rows);
-        c1 = 'Distributor'; c2 = 'SKU'; out = 'Invoice'; l1 = 'Distributor'; l2 = 'SKU'; la = 'Invoice'; text = true; file = 'penjualan_q4.xlsx';
-        title = 'Invoice number for a distributor and SKU pair'; what = 'the <b>Invoice</b> on which the distributor in <b>B1</b> bought the SKU in <b>B2</b>';
+        let st = [];
+        skus.forEach((x) => whs.forEach((w) => st.push({ sku: x.sku, wh: w, oh: r.int(1, 30) * 10, rp: r.pick([80, 100, 120, 150]) })));
+        st = r.shuffle(st);
+        const ST = H.table([{ h: 'SKU', k: 'sku' }, { h: 'Warehouse', k: 'wh' }, { h: 'On hand', k: 'oh', num: true }, { h: 'Reorder point', k: 'rp', num: true }], st);
+        const pl = r.shuffle(H.PRODUCTS);
+        const PM = H.table([{ h: 'SKU', k: 'sku' }, { h: 'Product', k: 'name' }, { h: 'Carton price (Rp)', k: 'carton_price', num: true }], pl);
+        const rows = r.sample(st, 14).map((x, k) => ({ req: 'REQ-' + (501 + k * 3 + r.int(0, 2)), wh: x.wh, sku: x.sku, cartons: Math.max(10, x.oh + r.pick([-60, -30, -10, 0, 20, 40, 70])) }));
+        const S = H.table([{ h: 'Request', k: 'req' }, { h: 'Warehouse', k: 'wh' }, { h: 'SKU', k: 'sku' }, { h: 'Cartons', k: 'cartons', num: true }], rows);
+        /* The hidden test: the stock count for row 5's SKU and warehouse is recounted, and one price rises. */
+        const s0 = st.findIndex((x) => x.sku === rows[0].sku && x.wh === rows[0].wh);
+        const stAlt = H.edit(ST.cells, { [ST.cell('On hand', s0)]: rows[0].cartons > st[s0].oh ? rows[0].cartons + 20 : Math.max(0, rows[0].cartons - 30) });
+        const pmAlt = H.edit(PM.cells, { [PM.cell('Carton price (Rp)', pl.findIndex((x) => x.sku === rows[1].sku))]: (x) => x + 6000 });
+        const sg = X('stok_gudang.xlsx', 'Stok', ST), pm = X('master_produk.xlsx', 'Produk', PM);
+        const SS = sg.A('SKU'), SW = sg.A('Warehouse'), SO = sg.A('On hand'), PS = pm.A('SKU'), PP = pm.A('Carton price (Rp)');
+        const cond = `(${SS}=C5)*(${SW}=B5)`, price = `XLOOKUP(C5,${PS},${PP})`;
+        return H.problem({
+          title: 'Value of each stock shortfall, by SKU and warehouse', file: 'permintaan_stok.xlsx', sheetName: 'Permintaan', sheet: S, base: S.cells, alt: S.cells, fill: true, fillCol: 'E', ansLabel: 'Shortfall (Rp)',
+          books: [wb('stok_gudang.xlsx', 'Stok', ST, stAlt), wb('master_produk.xlsx', 'Produk', PM, pmAlt)],
+          statement: `<p>${opens([['the stock requests', 'permintaan_stok.xlsx'], ['the stock count', 'stok_gudang.xlsx'], ['the product master', 'master_produk.xlsx']])} The stock count has one row for each SKU in each warehouse, so neither column alone finds the right row.</p><p>In <b>E5</b>, work out the value of the shortfall on each request: the <b>Cartons</b> asked for minus the <b>On hand</b> for that SKU <b>and</b> warehouse, but never below 0 (use MAX), times the SKU's <b>Carton price (Rp)</b> from the product master. Fill it down to <b>E${S.last}</b>.</p>`,
+          solution: `=MAX(0,D5-XLOOKUP(1,${cond},${SO}))*${price}`,
+          alts: [`=MAX(0,D5-SUMIFS(${SO},${SS},C5,${SW},B5))*${price}`, `=MAX(0,D5-INDEX(${SO},MATCH(1,${cond},0)))*VLOOKUP(C5,${pm.T('SKU', 'Carton price (Rp)')},3,FALSE)`,
+            `=MAX(D5-XLOOKUP(1,(${SW}=B5)*(${SS}=C5),${SO}),0)*${price}`],
+          hints: [`(${SS}=C5) is a column of TRUE and FALSE. Multiplied by (${SW}=B5), it is 1 only on the row where both match; XLOOKUP(1, ...) finds it.`,
+            'D5 minus that stock is the shortfall; MAX(0, ...) turns a covered request into 0. The price is a plain lookup in master_produk.xlsx.',
+            `Shape: =MAX(0, D5 - XLOOKUP(1, (${SS}=C5)*(${SW}=B5), ${SO})) * XLOOKUP(C5, ${PS}, ${PP})`],
+          explain: 'The two comparisons mark the rows of the stock count that match the SKU and the warehouse; their product is 1 only where both match, and XLOOKUP returns that row\'s On hand. MAX keeps the shortfall at 0 or more, and the carton price from the product master turns it into rupiah. SUMIFS on both conditions gives the same stock, since each pair appears once.',
+          chips: ['D5-', 'B5', 'C5', '(' + SS + '=C5)', '(' + SW + '=B5)', SO, PS, PP, 'MAX(0,'], fnKey: 'XLOOKUP('
+        });
       }
-      const n = rows.length;
-      const val = (h, k) => S.cells[S.cell(h, k)];
-      /* Pick rows where neither key alone finds the right row, so a one-condition lookup is caught. */
-      const firstOf = (h, k) => nums(n).findIndex((m) => val(h, m) === val(h, k));
-      const tricky = nums(n).filter((k) => firstOf(c1, k) !== k && firstOf(c2, k) !== k);
-      const pool = tricky.length >= 2 ? tricky : nums(n).filter((k) => firstOf(c1, k) !== k);
-      const i = r.pick(pool);
-      const j = r.pick(pool.filter((k) => k !== i && (val(c1, k) !== val(c1, i) || v !== 1)));
-      const base = Object.assign({}, S.cells, { A1: l1, B1: val(c1, i), A2: l2, B2: val(c2, i), A3: la });
-      const e = { B1: val(c1, j), B2: val(c2, j) };
-      if (!text && val(out, j) === val(out, i)) e[S.cell(out, j)] = val(out, j) + 10;
-      const alt = H.edit(base, e);
-      const A1r = S.R(c1), A2r = S.R(c2), O = S.R(out);
-      const cond = `(${A1r}=B1)*(${A2r}=B2)`;
-      const alts = [`=INDEX(${O},MATCH(1,${cond},0))`, `=FILTER(${O},${cond})`, `=XLOOKUP(1,(${A2r}=B2)*(${A1r}=B1),${O})`];
-      if (!text) alts.push(`=SUMIFS(${O},${A1r},B1,${A2r},B2)`);
+      if (v === 1) {
+        const facs = H.db().facilities;
+        const two = [...new Set(facs.filter((f) => f.type === 'Term Loan').map((f) => f.distributor))];
+        const both = facs.filter((f) => two.includes(f.distributor));
+        const pick = r.shuffle(both.concat(r.shuffle(facs.filter((f) => !two.includes(f.distributor))).slice(0, Math.max(0, 14 - both.length)))).slice(0, 14);
+        const rows = pick.map((f) => ({ d: f.distributor, type: f.type, days: r.pick([31, 31, 31, 24, 17, 10]) }));
+        const S = H.table([{ h: 'Distributor', k: 'd' }, { h: 'Loan type', k: 'type' }, { h: 'Days', k: 'days', num: true }], rows);
+        const bl = r.shuffle(facs);
+        const BP = H.table([{ h: 'Facility', k: 'facility_id' }, { h: 'Distributor', k: 'distributor' }, { h: 'Type', k: 'type' }, { h: 'Outstanding (Rp)', k: 'outstanding', num: true }], bl);
+        const RC = H.table([{ h: 'Loan type', k: 't' }, { h: 'Rate (% a year)', k: 'x', num: true }],
+          [{ t: 'Working Capital', x: r.pick([10, 10.5, 11]) }, { t: 'Term Loan', x: r.pick([11.5, 12, 12.5]) }, { t: 'Trade Finance', x: 9.5 }, { t: 'Investment', x: 11.25 }]);
+        /* The hidden test: a term loan's balance falls after a repayment, the Working Capital rate rises, and row 7 was
+           drawn for a different number of days. */
+        const tl = bl.findIndex((f) => f.type === 'Term Loan' && rows.some((x) => x.d === f.distributor && x.type === 'Term Loan'));
+        const bpAlt = H.edit(BP.cells, tl >= 0 ? { [BP.cell('Outstanding (Rp)', tl)]: (x) => x - 3000000 } : {});
+        const rcAlt = H.edit(RC.cells, { [RC.cell('Rate (% a year)', 0)]: (x) => x + 0.5 });
+        const alt = H.edit(S.cells, { [S.cell('Days', 2)]: (x) => (x === 31 ? 30 : 31) });
+        const bp = X('buku_pinjaman.xlsx', 'Fasilitas', BP), rc = X('suku_bunga.xlsx', 'Bunga', RC);
+        const BD = bp.A('Distributor'), BT = bp.A('Type'), BO = bp.A('Outstanding (Rp)'), RT = rc.A('Loan type'), RR = rc.A('Rate (% a year)');
+        const cond = `(${BD}=A5)*(${BT}=B5)`, rate = `XLOOKUP(B5,${RT},${RR})`;
+        const wrap = (o, x) => `=ROUND(${o}*${x}/100*C5/365,0)`;
+        return H.problem({
+          title: 'Monthly interest bill by borrower and loan type', file: 'tagihan_bunga.xlsx', sheetName: 'Tagihan', sheet: S, base: S.cells, alt, fill: true, fillCol: 'D', ansLabel: 'Interest (Rp)',
+          books: [wb('buku_pinjaman.xlsx', 'Fasilitas', BP, bpAlt), wb('suku_bunga.xlsx', 'Bunga', RC, rcAlt)],
+          statement: `<p>${opens([['the interest bills', 'tagihan_bunga.xlsx'], ['the loan book', 'buku_pinjaman.xlsx'], ['the rate card', 'suku_bunga.xlsx']])} Some distributors have two facilities, a Working Capital line and a Term Loan, so the loan book must be searched on the distributor <b>and</b> the type.</p><p>In <b>D5</b>, work out each bill: the facility's <b>Outstanding (Rp)</b> from the loan book, times the <b>Rate (% a year)</b> of its loan type from the rate card, divided by 100, times <b>Days</b> divided by 365, rounded to whole rupiah with ROUND. Fill it down to <b>D${S.last}</b>.</p>`,
+          solution: wrap(`XLOOKUP(1,${cond},${BO})`, rate),
+          alts: [wrap(`SUMIFS(${BO},${BD},A5,${BT},B5)`, rate), wrap(`INDEX(${BO},MATCH(1,${cond},0))`, `VLOOKUP(B5,${rc.T('Loan type', 'Rate (% a year)')},2,FALSE)`),
+            wrap(`XLOOKUP(1,(${BT}=B5)*(${BD}=A5),${BO})`, rate)],
+          hints: [`The balance needs two conditions in buku_pinjaman.xlsx: (${BD}=A5)*(${BT}=B5) is 1 only on the facility that matches both. XLOOKUP(1, that, ${BO}) returns its balance.`,
+            'The rate is a plain lookup of the loan type in suku_bunga.xlsx. Then divide by 100, multiply by C5 and divide by 365.',
+            `Shape: =ROUND(XLOOKUP(1, (${BD}=A5)*(${BT}=B5), ${BO}) * XLOOKUP(B5, ${RT}, ${RR}) / 100 * C5 / 365, 0)`],
+          explain: 'Multiplying the two comparisons leaves 1 only on the loan book row of that distributor and that type, so XLOOKUP(1, ...) returns the right balance even when the distributor has two facilities. The second XLOOKUP brings the yearly rate for the type. Balance times rate, for the days drawn out of 365, is the bill.',
+          chips: ['A5', 'B5', 'C5', '(' + BD + '=A5)', '(' + BT + '=B5)', BO, RT, RR, '/100*C5/365'], fnKey: 'XLOOKUP('
+        });
+      }
+      const skus = r.sample(H.PRODUCTS, 4);
+      const fct = {};
+      H.REGIONS.forEach((g) => { fct[g] = r.pick([1, 1.02, 1.04, 1.06, 1.08]); });
+      const hl = [];
+      H.REGIONS.forEach((g) => skus.forEach((x) => hl.push({ g, sku: x.sku, price: Math.round(x.carton_price * fct[g] / 1000) * 1000 })));
+      const HR = H.table([{ h: 'Region', k: 'g' }, { h: 'SKU', k: 'sku' }, { h: 'Carton price (Rp)', k: 'price', num: true }], hl);
+      const rows = H.sales(r, 14).map((s) => ({ date: s.date, d: s.distributor, sku: r.pick(skus).sku, cartons: s.cartons }));
+      const S = H.table([{ h: 'Date', k: 'date', date: true }, { h: 'Distributor', k: 'd' }, { h: 'SKU', k: 'sku' }, { h: 'Cartons', k: 'cartons', num: true }], rows);
+      const MD = H.table([DC.id, DC.name, DC.city, DC.region], r.shuffle(DIST()));
+      /* The hidden test: the regional price for row 5 rises, and row 8 turns out to be another SKU. */
+      const h0 = hl.findIndex((x) => x.g === regionOf(rows[0].d) && x.sku === rows[0].sku);
+      const hrAlt = H.edit(HR.cells, { [HR.cell('Carton price (Rp)', h0)]: (x) => x + 4000 });
+      const alt = H.edit(S.cells, { [S.cell('SKU', 3)]: skus.find((x) => x.sku !== rows[3].sku).sku });
+      const md = X('master_distributor.xlsx', 'Distributor', MD), hr = X('harga_regional.xlsx', 'Harga', HR);
+      const MN = md.A('Distributor'), MR = md.A('Region'), HG = hr.A('Region'), HS = hr.A('SKU'), HP = hr.A('Carton price (Rp)');
+      const reg = `XLOOKUP(B5,${MN},${MR})`;
       return H.problem({
-        title, file, sheet: S, base, alt, answerCell: 'B3', ansDate,
-        statement: `<p>In <b>B3</b>, return ${what}. Neither column alone is unique, so the row must match <b>both</b> B1 and B2.</p>`,
-        solution: `=XLOOKUP(1,${cond},${O})`,
-        alts,
-        hints: [`(${A1r}=B1) is a column of TRUE and FALSE. Multiplying two such columns gives 1 only on rows where both are TRUE.`,
-          'Look up the number 1 in that product, and return from the column you want.',
-          `Shape: =XLOOKUP(1, (${A1r}=B1)*(${A2r}=B2), ${O})`],
-        explain: `Each comparison marks the rows that match one key; multiplying them leaves 1 only where both match. XLOOKUP finds that 1 and returns ${out} from the same row. INDEX with MATCH(1, ..., 0) works the same way.`,
-        chips: [A1r, A2r, O, '(' + A1r + '=B1)', '(' + A2r + '=B2)', 'XLOOKUP(1,'], fnKey: 'XLOOKUP('
+        title: 'Order value from a price list by region and SKU', file: 'pesanan_q4.xlsx', sheetName: 'Pesanan', sheet: S, base: S.cells, alt, fill: true, fillCol: 'E', ansLabel: 'Value (Rp)',
+        books: [wb('master_distributor.xlsx', 'Distributor', MD), wb('harga_regional.xlsx', 'Harga', HR, hrAlt)],
+        statement: `<p>${opens([['the order lines', 'pesanan_q4.xlsx'], ['the distributor master', 'master_distributor.xlsx'], ['the regional price list', 'harga_regional.xlsx']])} Prices differ by region: the price list has one row for each region and SKU. The orders do not show the region.</p><p>In <b>E5</b>, work out each line's value: its <b>Cartons</b> times the <b>Carton price (Rp)</b> for its SKU in its distributor's region, which you look up in the master first. Fill it down to <b>E${S.last}</b>.</p>`,
+        solution: `=D5*XLOOKUP(1,(${HG}=${reg})*(${HS}=C5),${HP})`,
+        alts: [`=D5*SUMIFS(${HP},${HG},${reg},${HS},C5)`, `=D5*INDEX(${HP},MATCH(1,(${HG}=VLOOKUP(B5,${md.T('Distributor', 'Region')},3,FALSE))*(${HS}=C5),0))`,
+          `=D5*XLOOKUP(1,(${HS}=C5)*(${HG}=${reg}),${HP})`],
+        hints: [`The region comes first: XLOOKUP(B5, ${MN}, ${MR}) from master_distributor.xlsx.`,
+          `Then find the price row that matches both that region and the SKU in C5: (${HG}=region)*(${HS}=C5) is 1 only there.`,
+          `Shape: =D5 * XLOOKUP(1, (${HG}=XLOOKUP(B5, ${MN}, ${MR}))*(${HS}=C5), ${HP})`],
+        explain: 'The inner XLOOKUP turns the distributor into its region. Compared with the Region column of the price list and multiplied by the SKU comparison, it leaves 1 on the one row for that region and SKU, and the outer XLOOKUP returns its price. Times the cartons, that is the line\'s value. SUMIFS on the two conditions gives the same price.',
+        chips: ['D5*', 'B5', 'C5', MN, MR, HG, HS, HP, 'XLOOKUP(1,'], fnKey: 'XLOOKUP('
       });
     }
   });
 
   P.add({
-    key: 'last-match-in-a-log', difficulty: 'Hard', level: 9, topics: ['XLOOKUP', 'XMATCH', 'search mode'], count: 3,
+    key: 'last-match-in-a-log', difficulty: 'Hard', level: 9, topics: ['XLOOKUP', 'XMATCH', 'search mode', 'Several workbooks'], count: 3, multi: true,
     make(r, v) {
-      /* A log in date order: the latest entry for a key is its last match, found by searching from the bottom. */
+      /* A log in date order, kept in another workbook: the latest entry for a key is its last match, found by searching
+         from the bottom. A third workbook holds what it is compared with or combined with. */
       if (v === 0) {
-        const ids = r.sample(DIST(), 3).map((d) => d.id);
-        const rows = r.sample(H.db().sales.filter((s) => ids.includes(s.distributor_id)), 18).map((s) => Object.assign({}, s, { date: H.Q4(s.date) }))
-          .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.invoice < b.invoice ? -1 : 1));
-        const S = H.table([{ h: 'Date', k: 'date', date: true }, { h: 'Invoice', k: 'invoice' }, { h: 'Distributor', k: 'distributor' }, { h: 'Net (Rp)', k: 'net', num: true }], rows);
-        /* The asked-for distributor has no tie on its latest date, and its latest order is not its largest, so MAXIFS on
-           Net is caught. */
-        const rowsOf = (d) => rows.filter((x) => x.distributor === d);
-        const lastRow = (d) => rowsOf(d).pop();
-        const names = [...new Set(rows.map((x) => x.distributor))].filter((d) => rowsOf(d).length >= 2);
-        const uniq = names.filter((d) => rowsOf(d).filter((x) => x.date === lastRow(d).date).length === 1);
-        const pool = uniq.length >= 2 ? uniq : names;
-        const good = pool.filter((d) => lastRow(d).net < Math.max(...rowsOf(d).map((x) => x.net)));
-        const a = r.pick(good.length ? good : pool);
-        const b = r.pick(pool.filter((d) => d !== a));
-        let bump = 500000;
-        while (lastRow(b).net + bump === lastRow(a).net) bump += 100000;
-        const base = Object.assign({}, S.cells, { A1: 'Distributor', B1: a, A2: 'Latest Net (Rp)' });
-        const alt = H.edit(base, { B1: b, [S.cell('Net (Rp)', rows.indexOf(lastRow(b)))]: (x) => x + bump });
-        const D = S.R('Distributor'), T = S.R('Date'), N = S.R('Net (Rp)');
-        const alts = [`=INDEX(${N},XMATCH(B1,${D},0,-1))`, `=XLOOKUP(B1,${D},${N},,,-1)`];
-        if (pool === uniq) alts.push(`=SUMIFS(${N},${D},B1,${T},MAXIFS(${T},${D},B1))`);
+        const ds = r.sample(DIST(), 8);
+        const pool = H.db().sales.filter((s) => ds.some((d) => d.id === s.distributor_id));
+        const one = ds.map((d) => r.pick(pool.filter((s) => s.distributor_id === d.id)));
+        const log = one.concat(r.sample(pool.filter((s) => !one.includes(s)), 16)).map((s) => ({ date: H.Q4(s.date), inv: s.invoice, d: s.distributor, net: s.net }))
+          .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.inv < b.inv ? -1 : 1));
+        const LG = H.table([{ h: 'Date', k: 'date', date: true }, { h: 'Invoice', k: 'inv' }, { h: 'Distributor', k: 'd' }, { h: 'Net (Rp)', k: 'net', num: true }], log);
+        const NICE = [7, 14, 21, 30, 45, 60, 90, 120];
+        const cyc = r.shuffle(DIST()).map((d) => ({ d: d.name, region: d.region, c: r.pick([14, 21, 30, 45]) }));
+        const MD = H.table([{ h: 'Distributor', k: 'd' }, { h: 'Region', k: 'region' }, { h: 'Order cycle (days)', k: 'c', num: true }], cyc);
+        const S = H.table([{ h: 'Distributor', k: 'd' }, { h: 'City', k: 'city' }, { h: 'Rep', k: 'rep' }], ds.map((d) => ({ d: d.name, city: d.city, rep: r.pick(H.REPS) })));
+        const asOf = H.toSerial('2026-12-31');
+        const since = (name) => asOf - Math.max(...log.filter((x) => x.d === name).map((x) => H.toSerial(x.date)));
+        /* The hidden test: the master revises one distributor's order cycle so its status flips. */
+        const k = Math.max(0, ds.findIndex((d) => since(d.name) >= 10));
+        const w = cyc.findIndex((x) => x.d === ds[k].name), s = since(ds[k].name);
+        const nc = cyc[w].c >= s ? Math.max(0, ...NICE.filter((x) => x < s)) : Math.min(...NICE.filter((x) => x >= s));
+        const mdAlt = H.edit(MD.cells, { [MD.cell('Order cycle (days)', w)]: nc });
+        const base = Object.assign({}, S.cells, { A1: 'As of', B1: asOf });
+        const lg = X('penjualan_q4.xlsx', 'Penjualan', LG), md = X('master_distributor.xlsx', 'Distributor', MD);
+        const LD = lg.A('Distributor'), LT = lg.A('Date'), MN = md.A('Distributor'), MC = md.A('Order cycle (days)');
+        const last = `XLOOKUP(A5,${LD},${LT},,0,-1)`, cycle = `XLOOKUP(A5,${MN},${MC})`;
         return H.problem({
-          title: "Net value of a distributor's most recent order", file: 'penjualan_q4.xlsx', sheet: S, base, alt, answerCell: 'B2',
-          statement: `<p>The sales log is in date order, oldest first. In <b>B2</b>, return the <b>Net (Rp)</b> of the most recent order from the distributor in <b>B1</b>: its last row in the log.</p>`,
-          solution: `=XLOOKUP(B1,${D},${N},,0,-1)`,
-          alts,
-          hints: ['A normal lookup returns the first match from the top, which here is the oldest order.', 'XLOOKUP\'s sixth part, search_mode, set to -1 searches from the bottom up, so it finds the last match.', `Shape: =XLOOKUP(B1, ${D}, ${N}, , 0, -1)`],
-          explain: 'With search_mode -1, XLOOKUP starts at the bottom of the log and returns the first match it meets, which is the latest order. The largest Net is not always the latest one, so MAXIFS on Net does not give it.',
-          chips: [D, N, 'B1', ',,0,-1)'], fnKey: 'XLOOKUP('
+          title: 'Distributors due a follow-up call, from the last order in the log', file: 'tindak_lanjut.xlsx', sheetName: 'Review', sheet: S, base, alt: base, fill: true, fillCol: 'D', ansLabel: 'Status', dateCells: ['B1'],
+          books: [wb('penjualan_q4.xlsx', 'Penjualan', LG), wb('master_distributor.xlsx', 'Distributor', MD, mdAlt)],
+          statement: `<p>${opens([['the call list', 'tindak_lanjut.xlsx'], ['the sales log', 'penjualan_q4.xlsx'], ['the distributor master', 'master_distributor.xlsx']])} <b>B1</b> holds the review date. The sales log is in date order, oldest first, so a distributor's last row is its latest order.</p><p>In <b>D5</b>, show <b>Follow up</b> when the days since the distributor's latest order (B1 minus that order's <b>Date</b>) are more than its <b>Order cycle (days)</b> in the master, and <b>OK</b> otherwise. Fill it down to <b>D${S.last}</b>.</p>`,
+          solution: `=IF($B$1-${last}>${cycle},"Follow up","OK")`,
+          alts: [`=IF($B$1-MAXIFS(${LT},${LD},A5)>${cycle},"Follow up","OK")`, `=IF($B$1-INDEX(${LT},XMATCH(A5,${LD},0,-1))>VLOOKUP(A5,${md.T('Distributor', 'Order cycle (days)')},3,FALSE),"Follow up","OK")`,
+            `=IF(${last}+${cycle}<$B$1,"Follow up","OK")`],
+          hints: ['A normal lookup returns the first match from the top, which in this log is the oldest order. XLOOKUP\'s sixth part, search_mode, set to -1 searches from the bottom, so it finds the latest.',
+            `$B$1 minus that date is the days since the last order. Compare it with the cycle that XLOOKUP brings from master_distributor.xlsx.`,
+            `Shape: =IF($B$1 - XLOOKUP(A5, ${LD}, ${LT}, , 0, -1) > XLOOKUP(A5, ${MN}, ${MC}), "Follow up", "OK")`],
+          explain: 'Searching from the bottom of the sales log, XLOOKUP meets the distributor\'s latest order first and returns its date. B1 minus that date is how long it has been quiet, and the second XLOOKUP brings its usual order cycle from the master. More days than the cycle means a call is due. MAXIFS on the dates gives the same latest date here.',
+          chips: ['$B$1-', 'A5', LD, LT, MN, MC, ',,0,-1)', '"Follow up"', '"OK"'], fnKey: 'XLOOKUP('
         });
       }
       if (v === 1) {
         const skus = r.sample(H.PRODUCTS, 5);
         const seq = r.shuffle([0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 0]);
-        const price = skus.map((p) => p.carton_price);
+        const price = skus.map((x) => x.carton_price);
         let day = H.toSerial('2026-01-05');
-        const rows = seq.map((k) => { day += r.int(6, 20); price[k] += r.pick([-6000, -4000, 3000, 5000, 7000, 9000]); return { date: day, sku: skus[k].sku, price: price[k] }; });
-        const S = H.table([{ h: 'Date', k: 'date', date: true }, { h: 'SKU', k: 'sku' }, { h: 'New price (Rp)', k: 'price', num: true }], rows);
-        const lastIdx = (sku) => rows.map((x) => x.sku).lastIndexOf(sku);
-        const [a, b] = r.sample(skus.map((p) => p.sku), 2);
-        let d = 0;
-        if (rows[lastIdx(b)].price === rows[lastIdx(a)].price) d = 2000;
-        const base = Object.assign({}, S.cells, { A1: 'SKU', B1: a, A2: 'Current price (Rp)' });
-        const alt = H.edit(base, { B1: b, [S.cell('New price (Rp)', lastIdx(b))]: (x) => x + d + 1000 });
-        const K = S.R('SKU'), Pr = S.R('New price (Rp)');
+        const log = seq.map((k) => { day += r.int(6, 20); price[k] += r.pick([-6000, -4000, 3000, 5000, 7000, 9000]); return { date: day, sku: skus[k].sku, price: price[k] }; });
+        const RH = H.table([{ h: 'Date', k: 'date', date: true }, { h: 'SKU', k: 'sku' }, { h: 'New price (Rp)', k: 'price', num: true }], log);
+        const rows = H.sales(r, 14).map((s) => ({ date: s.date, d: s.distributor, sku: r.pick(skus).sku, cartons: s.cartons }));
+        const S = H.table([{ h: 'Date', k: 'date', date: true }, { h: 'Distributor', k: 'd' }, { h: 'SKU', k: 'sku' }, { h: 'Cartons', k: 'cartons', num: true }], rows);
+        const dl = r.shuffle(DIST());
+        const MD = H.table([DC.id, DC.name, DC.region, DC.disc], dl);
+        /* The hidden test: the latest change for row 5's SKU is corrected in the log, and row 7's distributor gets a
+           bigger discount. */
+        const lastIdx = (sku) => log.map((x) => x.sku).lastIndexOf(sku);
+        const rhAlt = H.edit(RH.cells, { [RH.cell('New price (Rp)', lastIdx(rows[0].sku))]: (x) => x + 3000 });
+        const mdAlt = H.edit(MD.cells, { [MD.cell('Discount (%)', dl.findIndex((d) => d.name === rows[2].d))]: (x) => x + 1.5 });
+        const rh = X('riwayat_harga.xlsx', 'Riwayat', RH), md = X('master_distributor.xlsx', 'Distributor', MD);
+        const RS = rh.A('SKU'), RP = rh.A('New price (Rp)'), MN = md.A('Distributor'), MDc = md.A('Discount (%)');
+        const disc = `XLOOKUP(B5,${MN},${MDc})`;
+        const wrap = (p, d) => `=ROUND(D5*${p}*(1-${d}/100),0)`;
         return H.problem({
-          title: 'Current price from a price change log', file: 'riwayat_harga.xlsx', sheet: S, base, alt, answerCell: 'B2',
-          statement: '<p>Each row records a price change, oldest first; the newest change for a SKU is its current price. In <b>B2</b>, return the current price of the SKU in <b>B1</b>.</p>',
-          solution: `=XLOOKUP(B1,${K},${Pr},,0,-1)`,
-          alts: [`=INDEX(${Pr},XMATCH(B1,${K},0,-1))`],
-          hints: ['The SKU appears several times; you want its last row, not its first.', 'XLOOKUP searches from the bottom when its sixth part, search_mode, is -1.', `Shape: =XLOOKUP(B1, ${K}, ${Pr}, , 0, -1)`],
-          explain: 'Searching from the bottom, XLOOKUP meets the SKU\'s newest change first and returns that price. The highest price is not always the current one, since some changes were cuts.',
-          chips: [K, Pr, 'B1', ',,0,-1)'], fnKey: 'XLOOKUP('
+          title: 'Order value at the current price from the price log, after discount', file: 'pesanan_q4.xlsx', sheetName: 'Pesanan', sheet: S, base: S.cells, alt: S.cells, fill: true, fillCol: 'E', ansLabel: 'Value (Rp)',
+          books: [wb('riwayat_harga.xlsx', 'Riwayat', RH, rhAlt), wb('master_distributor.xlsx', 'Distributor', MD, mdAlt)],
+          statement: `<p>${opens([['the order lines', 'pesanan_q4.xlsx'], ['the price change log', 'riwayat_harga.xlsx'], ['the distributor master', 'master_distributor.xlsx']])} The log records each price change, oldest first; a SKU's last change is its current price, and these orders are billed at the current price.</p><p>In <b>E5</b>, work out each line's value: its <b>Cartons</b> times the SKU's current price, times (1 minus the distributor's <b>Discount (%)</b> from the master divided by 100), rounded to whole rupiah with ROUND. Fill it down to <b>E${S.last}</b>.</p>`,
+          solution: wrap(`XLOOKUP(C5,${RS},${RP},,0,-1)`, disc),
+          alts: [wrap(`INDEX(${RP},XMATCH(C5,${RS},0,-1))`, disc), wrap(`XLOOKUP(C5,${RS},${RP},,,-1)`, `VLOOKUP(B5,${md.T('Distributor', 'Discount (%)')},3,FALSE)`),
+            `=ROUND(D5*XLOOKUP(C5,${RS},${RP},,0,-1)*(100-${disc})/100,0)`],
+          hints: ['The SKU appears several times in the log; you want its last row. XLOOKUP searches from the bottom when its sixth part, search_mode, is -1.',
+            'The discount is a plain lookup of the distributor in master_distributor.xlsx. (1 - discount/100) is the share the distributor pays.',
+            `Shape: =ROUND(D5 * XLOOKUP(C5, ${RS}, ${RP}, , 0, -1) * (1 - XLOOKUP(B5, ${MN}, ${MDc})/100), 0)`],
+          explain: 'Searching from the bottom, XLOOKUP meets the SKU\'s newest change first and returns that price; the highest price is not always the current one, since some changes were cuts. The second XLOOKUP brings the distributor\'s discount from the master. Cartons times price, less the discount, is the value.',
+          chips: ['D5*', 'B5', 'C5', RS, RP, MN, MDc, ',,0,-1)', '(1-'], fnKey: 'XLOOKUP('
         });
       }
-      const fac = r.sample(H.db().facilities, 4).map((f) => f.facility_id);
+      const fac = r.sample(H.db().facilities, 6);
       const ends = ['2026-07-31', '2026-08-31', '2026-09-30', '2026-10-31'];
-      const dpd = fac.map(() => r.pick([0, 0, 5, 15, 30]));
-      const rows = [];
-      ends.forEach((m, mi) => r.shuffle(nums(4)).forEach((k) => { if (mi) dpd[k] = Math.max(0, dpd[k] + r.pick([-15, 0, 0, 10, 20, 30])); rows.push({ m, f: fac[k], dpd: dpd[k] }); }));
-      const S = H.table([{ h: 'Month end', k: 'm', date: true }, { h: 'Facility', k: 'f' }, { h: 'DPD', k: 'dpd', num: true }], rows);
-      const chg = (f) => { const x = rows.filter((y) => y.f === f); return x[x.length - 1].dpd - x[0].dpd; };
-      const [a, b] = r.sample(fac, 2);
-      const lb = rows.map((y) => y.f).lastIndexOf(b);
-      const base = Object.assign({}, S.cells, { A1: 'Facility', B1: a, A2: 'Change in DPD' });
-      const alt = H.edit(base, { B1: b, [S.cell('DPD', lb)]: (x) => x + (chg(b) + 5 === chg(a) ? 10 : 5) });
-      const K = S.R('Facility'), D = S.R('DPD');
+      const dpd = fac.map(() => r.pick([0, 0, 5, 30, 60, 95]));
+      const log = [];
+      ends.forEach((m, mi) => r.shuffle(nums(6)).forEach((k) => { if (mi) dpd[k] = Math.max(0, dpd[k] + r.pick([-30, 0, 0, 15, 30, 45])); log.push({ m, f: fac[k].facility_id, dpd: dpd[k] }); }));
+      const DL = H.table([{ h: 'Month end', k: 'm', date: true }, { h: 'Facility', k: 'f' }, { h: 'DPD', k: 'dpd', num: true }], log);
+      const lo = [0, 1, 91, 121, 181];
+      const KT = H.table([{ h: 'From DPD', k: 'f', num: true }, { h: 'Kol', k: 'k', num: true }], lo.map((f, k) => ({ f, k: k + 1 })));
+      const S = H.table([{ h: 'Facility', k: 'f' }, { h: 'Distributor', k: 'd' }, { h: 'Outstanding (Rp)', k: 'out', num: true }], fac.map((f) => ({ f: f.facility_id, d: f.distributor, out: f.outstanding })));
+      /* The hidden test: the latest DPD of row 5's facility is revised into another grade. */
+      const li = log.map((x) => x.f).lastIndexOf(fac[0].facility_id);
+      const dlAlt = H.edit(DL.cells, { [DL.cell('DPD', li)]: tierAt(lo, log[li].dpd) >= 2 ? 30 : 95 });
+      const dl = X('pantauan_dpd.xlsx', 'DPD', DL), kt = X('kebijakan_kol.xlsx', 'Kol', KT);
+      const DF = dl.A('Facility'), DD = dl.A('DPD'), KF = kt.A('From DPD'), KK = kt.A('Kol'), KTT = kt.T('From DPD', 'Kol');
+      const latest = `XLOOKUP(A5,${DF},${DD},,0,-1)`, first = `XLOOKUP(A5,${DF},${DD})`;
       return H.problem({
-        title: 'Change in days past due from first to last check', file: 'pantauan_dpd.xlsx', sheet: S, base, alt, answerCell: 'B2',
-        statement: '<p>Dimas records each facility\'s days past due (DPD) at every month end, oldest first. In <b>B2</b>, return the change for the facility in <b>B1</b>: its latest DPD minus its first DPD in the log (negative when it improved).</p>',
-        solution: `=XLOOKUP(B1,${K},${D},,0,-1)-XLOOKUP(B1,${K},${D})`,
-        alts: [`=INDEX(${D},XMATCH(B1,${K},0,-1))-INDEX(${D},MATCH(B1,${K},0))`],
-        hints: ['You need two lookups on the same facility: the first match from the top and the first match from the bottom.', 'A plain XLOOKUP gives the first record; with search_mode -1 (its sixth part) it gives the last.', `Shape: =XLOOKUP(B1, ${K}, ${D}, , 0, -1) - XLOOKUP(B1, ${K}, ${D})`],
-        explain: 'The XLOOKUP that searches from the bottom returns the latest DPD, the normal one the earliest. Their difference shows whether the facility got worse (positive) or better (negative).',
-        chips: [K, D, 'B1', ',,0,-1)'], fnKey: 'XLOOKUP('
+        title: 'Kol grade change from the first to the latest DPD check', file: 'buku_pinjaman.xlsx', sheetName: 'Pinjaman', sheet: S, base: S.cells, alt: S.cells, fill: true, fillCol: 'D', ansLabel: 'Kol change',
+        books: [wb('pantauan_dpd.xlsx', 'DPD', DL, dlAlt), wb('kebijakan_kol.xlsx', 'Kol', KT)],
+        statement: `<p>${opens([['the loan book', 'buku_pinjaman.xlsx'], ['the DPD monitoring log', 'pantauan_dpd.xlsx'], ['the Kol policy', 'kebijakan_kol.xlsx']])} Dimas records each facility's DPD (days past due) at every month end, oldest first. The Kol policy lists the lowest DPD of each grade, smallest first.</p><p>In <b>D5</b>, work out how many grades the facility's Kol moved: the Kol of its <b>latest</b> DPD in the log minus the Kol of its <b>first</b> DPD. A positive number means it got worse. Fill it down to <b>D${S.last}</b>.</p>`,
+        solution: `=VLOOKUP(${latest},${KTT},2,TRUE)-VLOOKUP(${first},${KTT},2,TRUE)`,
+        alts: [`=XLOOKUP(${latest},${KF},${KK},,-1)-XLOOKUP(${first},${KF},${KK},,-1)`, `=VLOOKUP(INDEX(${DD},XMATCH(A5,${DF},0,-1)),${KTT},2,TRUE)-VLOOKUP(INDEX(${DD},MATCH(A5,${DF},0)),${KTT},2,TRUE)`,
+          `=LOOKUP(XLOOKUP(A5,${DF},${DD},,,-1),${KF},${KK})-LOOKUP(${first},${KF},${KK})`],
+        hints: ['Four lookups in two files: the first and the latest DPD from the log, and the Kol grade of each from the policy.',
+          `XLOOKUP(A5, ${DF}, ${DD}) is the first DPD; add , , 0, -1 to search from the bottom for the latest. VLOOKUP(dpd, ${KTT}, 2, TRUE) turns a DPD into its grade.`,
+          `Shape: =VLOOKUP(XLOOKUP(A5, ${DF}, ${DD}, , 0, -1), ${KTT}, 2, TRUE) - VLOOKUP(XLOOKUP(A5, ${DF}, ${DD}), ${KTT}, 2, TRUE)`],
+        explain: 'The XLOOKUP with search_mode -1 returns the facility\'s latest DPD in the log, the plain one its first. VLOOKUP with TRUE puts each in its Kol grade from the policy file, and the difference is how far the grade moved: 0 for no change, positive for a downgrade.',
+        chips: ['A5', DF, DD, KTT, KF, KK, ',,0,-1)', ',2,TRUE)'], fnKey: 'VLOOKUP('
       });
     }
   });
 
   P.add({
-    key: 'price-on-the-order-date', difficulty: 'Hard', level: 9, topics: ['XLOOKUP', 'VLOOKUP', 'approximate match', 'dates'], count: 3,
+    key: 'price-on-the-order-date', difficulty: 'Hard', level: 9, topics: ['XLOOKUP', 'VLOOKUP', 'approximate match', 'dates', 'Several workbooks'], count: 3, multi: true,
     make(r, v) {
-      /* A history of changes sorted by start date: the one in force on a date is the last start on or before it. */
+      /* A schedule in another workbook, sorted by start date: the entry in force on a date is the last start on or before
+         it. A third workbook brings the figure it is combined with. */
       const rows = H.sales(r, 14);
-      let side, sv, ans, title, file, what, bumpRow, wrap, main, num = true, extra = {};
       const rs = rows.map((x) => H.toSerial(x.date));
-      const starts = (at) => { let prev = H.toSerial('2026-09-01'); return [prev].concat(at.map((k) => (prev = Math.max(rs[k], prev + 1)))); };
       if (v === 0) {
-        const p = r.pick(H.PRODUCTS);
-        let pr = p.carton_price;
-        side = starts([3, 7, 11]).map((d, k) => ({ d, x: k ? (pr += r.pick([4000, 6000, 8000, -3000])) : pr }));
-        sv = 'Carton price (Rp)'; ans = 'Value (Rp)'; file = 'pesanan_' + p.sku.toLowerCase() + '.xlsx';
-        title = 'Order value at the price in force on its date';
-        main = [{ h: 'Date', k: 'date', date: true }, { h: 'Invoice', k: 'invoice' }, { h: 'Distributor', k: 'distributor' }, { h: 'Cartons', k: 'cartons', num: true }];
-        what = `the value of each order of ${p.name}: its <b>Cartons</b> times the carton price in force on the order <b>Date</b>`;
-        wrap = (f) => '=D5*' + f;
-        extra = { A1: 'Product', B1: p.name };
-      } else if (v === 1) {
-        side = starts([r.int(2, 4), r.int(6, 8), r.int(10, 12)]).map((d, k) => ({ d, x: [9.5, 9.75, 10.25, 10][k] + r.pick([-0.25, 0, 0.25]) }));
-        rows.forEach((x) => { x.amount = r.pick([20, 25, 40, 50, 75, 100]) * 1000000; x.days = r.pick([30, 45, 60, 90]); });
-        sv = 'Base rate (% a year)'; ans = 'Interest (Rp)'; file = 'pencairan_kredit.xlsx';
-        title = 'Drawdown interest at the base rate on its date';
-        main = [{ h: 'Date', k: 'date', date: true }, { h: 'Distributor', k: 'distributor' }, { h: 'Amount (Rp)', k: 'amount', num: true }, { h: 'Days', k: 'days', num: true }];
-        what = 'the interest on each drawdown: <b>Amount (Rp)</b> times the base rate in force on its <b>Date</b>, divided by 100, times <b>Days</b> divided by 365, rounded to whole rupiah with ROUND';
-        wrap = (f) => '=ROUND(C5*' + f + '/100*D5/365,0)';
-      } else {
-        side = starts([r.int(2, 3), r.int(5, 6), r.int(8, 9), r.int(11, 12)]).map((d, k) => ({ d, x: ['No promo', 'Payday Deal', 'No promo', 'Payday Deal', 'Year-end Sale'][k] }));
-        sv = 'Promo'; ans = 'Promo'; file = 'kalender_promo.xlsx'; num = false;
-        title = 'Promo running on each order date';
-        main = [{ h: 'Date', k: 'date', date: true }, { h: 'Invoice', k: 'invoice' }, { h: 'Distributor', k: 'distributor' }, { h: 'Net (Rp)', k: 'net', num: true }];
-        what = 'the <b>Promo</b> running on the order <b>Date</b>: the one whose <b>From</b> date is the latest on or before it';
-        wrap = (f) => '=' + f;
+        const per = startDates(rs, [3, 7, 11]);
+        const skus = H.PRODUCTS.map((x) => x.sku);
+        const pr = H.PRODUCTS.map((x) => { let c = x.carton_price; return per.map((d, i) => (i ? (c += r.pick([0, 2000, 4000, 6000])) : c)); });
+        const cells = { A4: 'From' };
+        skus.forEach((s, j) => { cells[L[j + 1] + '4'] = s; });
+        per.forEach((d, i) => { cells['A' + (5 + i)] = d; skus.forEach((s, j) => { cells[L[j + 1] + (5 + i)] = pr[j][i]; }); });
+        const HP = { cells, cols: L.slice(0, 13), num: L.slice(1, 13), dateCols: ['A'], first: 5, last: 4 + per.length };
+        const S = H.table([{ h: 'Date', k: 'date', date: true }, { h: 'Distributor', k: 'distributor' }, { h: 'SKU', k: 'sku' }, { h: 'Cartons', k: 'cartons', num: true }], rows);
+        const dl = r.shuffle(DIST());
+        const MD = H.table([DC.id, DC.name, DC.region, DC.disc], dl);
+        const at = (m) => tierAt(per, rs[m]), price = (m, i) => pr[skus.indexOf(rows[m].sku)][i];
+        /* The hidden test: one order moves to exactly the start of the third period, at a different price; the price
+           list corrects row 5's price, and row 6's distributor gets a bigger discount. */
+        const km = Math.max(0, nums(14).findIndex((m) => rs[m] !== per[2] && at(m) !== 2 && price(m, at(m)) !== price(m, 2)));
+        const alt = H.edit(S.cells, { [S.cell('Date', km)]: per[2] });
+        const hpAlt = H.edit(cells, { [L[skus.indexOf(rows[0].sku) + 1] + (5 + at(0))]: (x) => x + 3000 });
+        const mdAlt = H.edit(MD.cells, { [MD.cell('Discount (%)', dl.findIndex((d) => d.name === rows[1].distributor))]: (x) => x + 1 });
+        const g = gridRefs('harga_periode.xlsx', 'Harga', HP), md = X('master_distributor.xlsx', 'Distributor', MD);
+        const MN = md.A('Distributor'), MDc = md.A('Discount (%)'), disc = `XLOOKUP(B5,${MN},${MDc})`;
+        const wrap = (p, d) => `=ROUND(D5*${p}*(1-${d}/100),0)`;
+        return H.problem({
+          title: 'Order value from a price-by-period sheet, after discount', file: 'pesanan_q4.xlsx', sheetName: 'Pesanan', sheet: S, base: S.cells, alt, fill: true, fillCol: 'E', ansLabel: 'Value (Rp)',
+          books: [wb('harga_periode.xlsx', 'Harga', HP, hpAlt), wb('master_distributor.xlsx', 'Distributor', MD, mdAlt)],
+          statement: `<p>${opens([['the order lines', 'pesanan_q4.xlsx'], ['the price list by period', 'harga_periode.xlsx'], ['the distributor master', 'master_distributor.xlsx']])} The price list has one row per period, with the date it starts in column A, oldest first, and one column per SKU across row 4. A period runs until the next one starts.</p><p>In <b>E5</b>, work out each line's value: its <b>Cartons</b> times the carton price of its SKU in the period that covers its <b>Date</b>, times (1 minus the distributor's <b>Discount (%)</b> divided by 100), rounded to whole rupiah with ROUND. Fill it down to <b>E${S.last}</b>.</p>`,
+          solution: wrap(`INDEX(${g.G},MATCH(A5,${g.RK},1),MATCH(C5,${g.CK},0))`, disc),
+          alts: [wrap(`XLOOKUP(A5,${g.RK},XLOOKUP(C5,${g.CK},${g.G}),,-1)`, disc), wrap(`VLOOKUP(A5,${g.ALL},MATCH(C5,${g.HEAD},0),TRUE)`, `VLOOKUP(B5,${md.T('Distributor', 'Discount (%)')},3,FALSE)`),
+            wrap(`INDEX(${g.G},XMATCH(A5,${g.RK},-1),XMATCH(C5,${g.CK}))`, disc)],
+          hints: ['The price is a two-way lookup with a twist: the SKU column is an exact match, but the period row is the last start date on or before the order date.',
+            `MATCH(A5, ${g.RK}, 1) gives that row on the sorted dates; MATCH(C5, ${g.CK}, 0) gives the SKU column. The discount is a plain lookup in master_distributor.xlsx.`,
+            `Shape: =ROUND(D5 * INDEX(${g.G}, MATCH(A5, ${g.RK}, 1), MATCH(C5, ${g.CK}, 0)) * (1 - XLOOKUP(B5, ${MN}, ${MDc})/100), 0)`],
+          explain: 'Dates are numbers, so MATCH with 1 finds the last start date that is not after the order date: the period in force. An order on a start date gets the new price. The other MATCH finds the SKU across row 4, and INDEX returns the price where they cross. The distributor\'s discount from the master takes its share off the value.',
+          chips: ['D5*', 'A5', 'B5', 'C5', g.G, g.RK, g.CK, MN, MDc, ',1)', ',0)'], fnKey: 'INDEX('
+        });
       }
-      const S = H.table(main, rows);
-      const M = H.table([{ h: 'From', k: 'd', date: true }, { h: sv, k: 'x', num }], side, { startCol: 6 });
-      const B = board([S, M]);
-      const ser = side.map((s) => s.d);
-      const tierOf = (x) => { let k = 0; ser.forEach((s, m) => { if (x >= s) k = m; }); return k; };
-      /* The hidden sheet: one order moves to exactly the start date of a different period. */
-      const k = nums(14).find((m) => rs[m] !== ser[2] && side[tierOf(rs[m])].x !== side[2].x);
-      bumpRow = k === undefined ? 0 : k;
-      const e = { [S.cell('Date', bumpRow)]: ser[2] };
-      if (num) e[M.cell(sv, 1)] = (x) => x + (v === 1 ? 0.25 : 2000);
-      const alt = H.edit(Object.assign({}, B.cells, extra), e);
-      const KA = M.A('From'), VA = M.A(sv), TA = '$G$5:$H$' + M.last;
-      return build(B, {
-        title, file, base: Object.assign({}, B.cells, extra), alt, fill: true, fillCol: 'E', ansLabel: ans,
-        statement: `<p>The table in <b>G5:H${M.last}</b> lists each change with the date it starts, oldest first; it stays in force until the next one starts. In <b>E5</b>, return ${what}. Fill it down to <b>E${S.last}</b>.</p>`,
-        solution: wrap(`XLOOKUP(A5,${KA},${VA},,-1)`),
-        alts: [wrap(`VLOOKUP(A5,${TA},2,TRUE)`), wrap(`LOOKUP(A5,${KA},${VA})`), wrap(`INDEX(${VA},MATCH(A5,${KA},1))`)],
-        hints: ['Dates are numbers, so an approximate match works on them too: you want the last start date that is on or before the order date.',
-          `XLOOKUP with match_mode -1 returns the exact date or the next smaller one. Pin the table: ${KA} and ${VA}.`,
-          `Shape: ${wrap('XLOOKUP(A5, ' + KA + ', ' + VA + ', , -1)')}`],
-        explain: `match_mode -1 makes XLOOKUP fall back to the latest start date before the order date when there is no exact match, which is the period in force. An order on a start date gets the new value. VLOOKUP with TRUE does the same on the sorted table.`,
-        chips: ['A5', KA, VA, TA, ',,-1)', ',2,TRUE)'], fnKey: 'XLOOKUP('
+      if (v === 1) {
+        rows.forEach((x) => { x.amount = r.pick([20, 25, 40, 50, 75, 100]) * 1000000; x.days = r.pick([30, 45, 60, 90]); });
+        const per = startDates(rs, [r.int(2, 4), r.int(6, 8), r.int(10, 12)]);
+        const side = per.map((d, k) => ({ d, x: [9.5, 9.75, 10.25, 10][k] + r.pick([-0.25, 0, 0.25]) }));
+        const BR = H.table([{ h: 'From', k: 'd', date: true }, { h: 'Base rate (% a year)', k: 'x', num: true }], side);
+        const ll = r.shuffle(DIST()).map((d) => ({ d: d.name, lim: r.pick([100, 150, 200, 250]) * 1000000, sp: r.pick([1.5, 2, 2.5, 3]) }));
+        const LK = H.table([{ h: 'Distributor', k: 'd' }, { h: 'Limit (Rp)', k: 'lim', num: true }, { h: 'Spread (%)', k: 'sp', num: true }], ll);
+        const S = H.table([{ h: 'Date', k: 'date', date: true }, { h: 'Distributor', k: 'distributor' }, { h: 'Amount (Rp)', k: 'amount', num: true }, { h: 'Days', k: 'days', num: true }], rows);
+        /* The hidden test: one drawdown moves to exactly the start of the third period, the second base rate is revised,
+           and row 6's distributor gets a wider spread. */
+        const km = Math.max(0, nums(14).findIndex((m) => rs[m] !== per[2] && side[tierAt(per, rs[m])].x !== side[2].x));
+        const alt = H.edit(S.cells, { [S.cell('Date', km)]: per[2] });
+        const brAlt = H.edit(BR.cells, { [BR.cell('Base rate (% a year)', 1)]: (x) => x + 0.25 });
+        const lkAlt = H.edit(LK.cells, { [LK.cell('Spread (%)', ll.findIndex((x) => x.d === rows[1].distributor))]: (x) => x + 0.5 });
+        const br = X('suku_bunga_dasar.xlsx', 'Dasar', BR), lk = X('limit_kredit.xlsx', 'Limit', LK);
+        const BF = br.A('From'), BB = br.A('Base rate (% a year)'), LD = lk.A('Distributor'), LS = lk.A('Spread (%)');
+        const wrap = (b, s) => `=ROUND(C5*(${b}+${s})/100*D5/365,0)`;
+        const spread = `XLOOKUP(B5,${LD},${LS})`;
+        return H.problem({
+          title: 'Drawdown interest at the base rate on its date plus the spread', file: 'pencairan_kredit.xlsx', sheetName: 'Pencairan', sheet: S, base: S.cells, alt, fill: true, fillCol: 'E', ansLabel: 'Interest (Rp)',
+          books: [wb('suku_bunga_dasar.xlsx', 'Dasar', BR, brAlt), wb('limit_kredit.xlsx', 'Limit', LK, lkAlt)],
+          statement: `<p>${opens([['the drawdowns', 'pencairan_kredit.xlsx'], ['the base rate history', 'suku_bunga_dasar.xlsx'], ['the limit file', 'limit_kredit.xlsx']])} The base rate history lists each change with the date it starts, oldest first; a rate stays in force until the next one starts. Each distributor pays its own <b>Spread (%)</b> on top, from the limit file.</p><p>In <b>E5</b>, work out the interest on each drawdown: its <b>Amount (Rp)</b> times (the base rate in force on its <b>Date</b> plus the distributor's spread), divided by 100, times <b>Days</b> divided by 365, rounded to whole rupiah with ROUND. Fill it down to <b>E${S.last}</b>.</p>`,
+          solution: wrap(`XLOOKUP(A5,${BF},${BB},,-1)`, spread),
+          alts: [wrap(`VLOOKUP(A5,${br.T('From', 'Base rate (% a year)')},2,TRUE)`, `VLOOKUP(B5,${lk.T('Distributor', 'Spread (%)')},3,FALSE)`), wrap(`LOOKUP(A5,${BF},${BB})`, spread),
+            wrap(`INDEX(${BB},MATCH(A5,${BF},1))`, `INDEX(${LS},MATCH(B5,${LD},0))`)],
+          hints: ['Two lookups in two files: the base rate by date (approximate: the last start on or before A5) and the spread by distributor (exact).',
+            `XLOOKUP(A5, ${BF}, ${BB}, , -1) returns the exact date or the next earlier one. Add the spread inside brackets before multiplying.`,
+            `Shape: =ROUND(C5 * (XLOOKUP(A5, ${BF}, ${BB}, , -1) + XLOOKUP(B5, ${LD}, ${LS})) / 100 * D5 / 365, 0)`],
+          explain: 'With match_mode -1, XLOOKUP falls back to the latest start date before the drawdown when there is no exact match, which is the base rate in force; a drawdown on a start date gets the new rate. The second XLOOKUP brings the distributor\'s spread. Their sum is the yearly rate, applied to the amount for the days drawn out of 365.',
+          chips: ['C5*', 'A5', 'B5', 'D5', BF, BB, LD, LS, ',,-1)', '/100*D5/365'], fnKey: 'XLOOKUP('
+        });
+      }
+      const per = startDates(rs, [r.int(2, 3), r.int(5, 6), r.int(8, 9), r.int(11, 12)]);
+      const pd = r.pick([5, 7.5]);
+      const side = per.map((d, k) => ({ d, p: ['No promo', 'Payday Deal', 'No promo', 'Payday Deal', 'Year-end Sale'][k], x: [0, pd, 0, pd, r.pick([8, 10])][k] }));
+      const KP = H.table([{ h: 'From', k: 'd', date: true }, { h: 'Promo', k: 'p' }, { h: 'Discount (%)', k: 'x', num: true }], side);
+      const pl = r.shuffle(H.PRODUCTS);
+      const PM = H.table([{ h: 'SKU', k: 'sku' }, { h: 'Product', k: 'name' }, { h: 'Carton price (Rp)', k: 'carton_price', num: true }], pl);
+      const S = H.table([{ h: 'Date', k: 'date', date: true }, { h: 'Distributor', k: 'distributor' }, { h: 'SKU', k: 'sku' }, { h: 'Cartons', k: 'cartons', num: true }], rows);
+      /* The hidden test: one order moves to exactly the start of a Payday Deal, the first Payday Deal gets deeper, and
+         the master raises the price of a SKU sold during a promo. */
+      const km = Math.max(0, nums(14).findIndex((m) => rs[m] !== per[3] && side[tierAt(per, rs[m])].x !== side[3].x));
+      const alt = H.edit(S.cells, { [S.cell('Date', km)]: per[3] });
+      const kpAlt = H.edit(KP.cells, { [KP.cell('Discount (%)', 1)]: (x) => x + 2.5 });
+      const kd = nums(14).find((m) => m !== km && side[tierAt(per, rs[m])].x > 0);
+      const pmAlt = H.edit(PM.cells, { [PM.cell('Carton price (Rp)', pl.findIndex((x) => x.sku === rows[kd === undefined ? 5 : kd].sku))]: (x) => x + 4000 });
+      const kp = X('kalender_promo.xlsx', 'Promo', KP), pm = X('master_produk.xlsx', 'Produk', PM);
+      const KF = kp.A('From'), KD = kp.A('Discount (%)'), PS = pm.A('SKU'), PP = pm.A('Carton price (Rp)');
+      const price = `XLOOKUP(C5,${PS},${PP})`;
+      const wrap = (p, d) => `=ROUND(D5*${p}*${d}/100,0)`;
+      return H.problem({
+        title: 'Promo discount on the order date, prices from the master', file: 'pesanan_q4.xlsx', sheetName: 'Pesanan', sheet: S, base: S.cells, alt, fill: true, fillCol: 'E', ansLabel: 'Promo discount (Rp)',
+        books: [wb('kalender_promo.xlsx', 'Promo', KP, kpAlt), wb('master_produk.xlsx', 'Produk', PM, pmAlt)],
+        statement: `<p>${opens([['the order lines', 'pesanan_q4.xlsx'], ['the promo calendar', 'kalender_promo.xlsx'], ['the product master', 'master_produk.xlsx']])} The calendar lists each promo period with the date it starts, oldest first; it runs until the next one starts.</p><p>In <b>E5</b>, work out the promo discount on each line: its <b>Cartons</b> times the SKU's <b>Carton price (Rp)</b> from the master, times the <b>Discount (%)</b> of the promo running on its <b>Date</b>, divided by 100 and rounded to whole rupiah with ROUND. Fill it down to <b>E${S.last}</b>.</p>`,
+        solution: wrap(price, `XLOOKUP(A5,${KF},${KD},,-1)`),
+        alts: [wrap(`VLOOKUP(C5,${pm.T('SKU', 'Carton price (Rp)')},3,FALSE)`, `VLOOKUP(A5,${kp.T('From', 'Discount (%)')},3,TRUE)`), wrap(price, `LOOKUP(A5,${KF},${KD})`),
+          wrap(`INDEX(${PP},MATCH(C5,${PS},0))`, `INDEX(${KD},MATCH(A5,${KF},1))`)],
+        hints: ['Two lookups in two files: the carton price by SKU (exact) and the promo discount by date (approximate: the last start on or before A5).',
+          `XLOOKUP(A5, ${KF}, ${KD}, , -1) returns the discount of the period in force; a date with no promo returns 0.`,
+          `Shape: =ROUND(D5 * XLOOKUP(C5, ${PS}, ${PP}) * XLOOKUP(A5, ${KF}, ${KD}, , -1) / 100, 0)`],
+        explain: 'XLOOKUP brings the carton price from the product master. With match_mode -1, the second XLOOKUP falls back to the latest promo start before the order date, so it returns the discount of the promo running then, and an order on a start date gets the new promo. Cartons times price times that %, divided by 100, is the discount.',
+        chips: ['D5*', 'A5', 'C5', PS, PP, KF, KD, ',,-1)'], fnKey: 'XLOOKUP('
       });
     }
   });
 
   P.add({
-    key: 'nested-lookup-chain', difficulty: 'Hard', level: 9, topics: ['XLOOKUP', 'VLOOKUP', 'nested lookup'], count: 3,
+    key: 'nested-lookup-chain', difficulty: 'Hard', level: 9, topics: ['XLOOKUP', 'VLOOKUP', 'nested lookup', 'Several workbooks'], count: 3, multi: true,
     make(r, v) {
-      /* The answer is two or three lookups deep: the result of one lookup is what the next one searches for. */
+      /* The answer is two or three lookups deep, each in a different workbook: the result of one lookup is what the next
+         one searches for. Then the math. */
       if (v === 0) {
-        const inv = H.invoices(r, 14), dl = r.shuffle(DIST());
+        const inv = H.invoices(r, 14);
         const S = H.table([{ h: 'Invoice', k: 'ref' }, { h: 'Date', k: 'date', date: true }, { h: 'Distributor', k: 'distributor' }, { h: 'Amount (Rp)', k: 'amount', num: true }], inv);
-        const M = H.table([{ h: 'Distributor', k: 'name' }, { h: 'City', k: 'city' }, { h: 'Region', k: 'region' }], dl, { startCol: 5 });
-        const B = board([S, M]);
-        const reg = (k) => DIST().find((d) => d.name === inv[k].distributor).region;
-        const i = r.int(1, 13);
-        const j = r.pick(nums(14).filter((k) => reg(k) !== reg(i)));
-        const base = Object.assign({}, B.cells, { A1: 'Invoice', B1: inv[i].ref, A2: 'Region' });
-        const alt = H.edit(base, { B1: inv[j].ref });
-        return build(B, {
-          title: 'Region of the distributor on an invoice (nested lookup)', file: 'faktur_q4.xlsx', base, alt, answerCell: 'B2',
-          statement: '<p>The invoice list does not show regions; the distributor list in <b>F5:H18</b> does. In <b>B2</b>, return the <b>Region</b> of the distributor on the invoice in <b>B1</b>, in one formula.</p>',
-          solution: '=XLOOKUP(XLOOKUP(B1,A5:A18,C5:C18),F5:F18,H5:H18)',
-          alts: ['=VLOOKUP(VLOOKUP(B1,A5:D18,3,FALSE),F5:H18,3,FALSE)', '=INDEX(H5:H18,MATCH(INDEX(C5:C18,MATCH(B1,A5:A18,0)),F5:F18,0))', '=XLOOKUP(XLOOKUP(B1,A5:A18,C5:C18),F5:F18,H5:H18,"",0)'],
-          hints: ['Step one: which distributor is on the invoice? Step two: which region is that distributor in?', 'The first lookup, XLOOKUP(B1, A5:A18, C5:C18), returns a name. Use it as the value to find in the second lookup.', 'Shape: =XLOOKUP(XLOOKUP(B1, A5:A18, C5:C18), F5:F18, H5:H18)'],
-          explain: 'The inner XLOOKUP turns the invoice number into a distributor name. The outer one searches that name in the distributor list and returns its region.',
-          chips: ['A5:A18', 'C5:C18', 'F5:F18', 'H5:H18', 'B1'], fnKey: 'XLOOKUP('
+        const MD = H.table([DC.id, DC.name, DC.city, DC.region], r.shuffle(DIST()));
+        const regs = r.shuffle(H.REGIONS).map((g) => ({ g, p: r.pick([0.5, 0.75, 1, 1.5, 2]) }));
+        const IR = H.table([{ h: 'Region', k: 'g' }, { h: 'Incentive (%)', k: 'p', num: true }], regs);
+        /* The hidden test: the incentive for row 5's region rises, and one invoice amount is corrected. */
+        const irAlt = H.edit(IR.cells, { [IR.cell('Incentive (%)', regs.findIndex((x) => x.g === regionOf(inv[0].distributor)))]: (x) => x + 0.5 });
+        const alt = H.edit(S.cells, { [S.cell('Amount (Rp)', 4)]: (x) => x + 2500000 });
+        const md = X('master_distributor.xlsx', 'Distributor', MD), ir = X('insentif_regional.xlsx', 'Insentif', IR);
+        const MN = md.A('Distributor'), MR = md.A('Region'), IG = ir.A('Region'), IP = ir.A('Incentive (%)');
+        const inner = `XLOOKUP(C5,${MN},${MR})`;
+        return H.problem({
+          title: 'Regional incentive on each invoice, through the distributor master', file: 'faktur_q4.xlsx', sheetName: 'Faktur', sheet: S, base: S.cells, alt, fill: true, fillCol: 'E', ansLabel: 'Incentive (Rp)',
+          books: [wb('master_distributor.xlsx', 'Distributor', MD), wb('insentif_regional.xlsx', 'Insentif', IR, irAlt)],
+          statement: `<p>${opens([['the invoices', 'faktur_q4.xlsx'], ['the distributor master', 'master_distributor.xlsx'], ['the regional incentives', 'insentif_regional.xlsx']])} Rasa Kenari pays distributors an incentive set per region. The invoices do not show the region.</p><p>In <b>E5</b>, work out the incentive on each invoice: its <b>Amount (Rp)</b> times the <b>Incentive (%)</b> of the distributor's region, divided by 100 and rounded to whole rupiah with ROUND. Fill it down to <b>E${S.last}</b>.</p>`,
+          solution: `=ROUND(D5*XLOOKUP(${inner},${IG},${IP})/100,0)`,
+          alts: [`=ROUND(D5*VLOOKUP(VLOOKUP(C5,${md.T('Distributor', 'Region')},3,FALSE),${ir.T('Region', 'Incentive (%)')},2,FALSE)/100,0)`,
+            `=ROUND(D5*INDEX(${IP},MATCH(INDEX(${MR},MATCH(C5,${MN},0)),${IG},0))/100,0)`, `=ROUND(XLOOKUP(${inner},${IG},${IP})*D5/100,0)`],
+          hints: ['Step one: which region is the distributor in? That is in master_distributor.xlsx. Step two: what is that region\'s incentive? That is in insentif_regional.xlsx.',
+            `The inner lookup, ${inner.replace(/,/g, ', ')}, returns a region. Use it as the value to find in ${IG}.`,
+            `Shape: =ROUND(D5 * XLOOKUP(XLOOKUP(C5, ${MN}, ${MR}), ${IG}, ${IP}) / 100, 0)`],
+          explain: 'The inner XLOOKUP turns the distributor into its region from the master; the outer one finds that region in the incentive file and returns its percentage. Amount times that %, divided by 100 and rounded, is the incentive.',
+          chips: ['D5*', 'C5', MN, MR, IG, IP, md.T('Distributor', 'Region'), ir.T('Region', 'Incentive (%)')], fnKey: 'XLOOKUP('
         });
       }
       if (v === 1) {
         const rows = H.sales(r, 14);
-        const prods = r.shuffle(H.PRODUCTS);
+        const pl = r.shuffle(H.PRODUCTS);
         const base4 = [r.pick([16, 18, 20]), r.pick([24, 26, 28]), r.pick([30, 32, 35]), r.pick([25, 27, 29])];
         const cats = r.shuffle(H.CATEGORIES.map((c, k) => ({ c, m: base4[k] })));
         const S = H.table([{ h: 'Date', k: 'date', date: true }, { h: 'SKU', k: 'sku' }, { h: 'Cartons', k: 'cartons', num: true }, { h: 'Gross (Rp)', k: 'gross', num: true }], rows);
-        const M = H.table([{ h: 'SKU', k: 'sku' }, { h: 'Category', k: 'category' }], prods, { startCol: 6 });
-        const C = H.table([{ h: 'Category', k: 'c' }, { h: 'Margin (%)', k: 'm', num: true }], cats, { startCol: 9 });
-        const B = board([S, M, C]);
-        const catOf = (sku) => H.PRODUCTS.find((p) => p.sku === sku).category;
-        const ci = cats.findIndex((x) => x.c === catOf(rows[0].sku));
-        const swap = r.pick(H.PRODUCTS.filter((p) => p.category !== catOf(rows[3].sku)));
-        const alt = H.edit(B.cells, { [C.cell('Margin (%)', ci)]: (x) => x + 2, [S.cell('SKU', 3)]: swap.sku, [S.cell('Gross (Rp)', 3)]: rows[3].cartons * swap.carton_price });
-        const inner = 'XLOOKUP(B5,$G$5:$G$16,$H$5:$H$16)';
-        return build(B, {
-          title: 'Line margin through a category margin table', file: 'margin_q4.xlsx', base: B.cells, alt, fill: true, fillCol: 'E', ansLabel: 'Margin (Rp)',
-          statement: `<p>Margins are set per category, not per SKU. In <b>E5</b>, return the margin in rupiah of each line: its <b>Gross (Rp)</b> times the <b>Margin (%)</b> of its SKU's category, divided by 100 and rounded to whole rupiah with ROUND. The SKU's category is in <b>G5:H16</b> and the category margins in <b>J5:K8</b>. Fill it down to <b>E${S.last}</b>.</p>`,
-          solution: `=ROUND(D5*XLOOKUP(${inner},$J$5:$J$8,$K$5:$K$8)/100,0)`,
-          alts: ['=ROUND(D5*VLOOKUP(VLOOKUP(B5,$G$5:$H$16,2,FALSE),$J$5:$K$8,2,FALSE)/100,0)', '=ROUND(D5*INDEX($K$5:$K$8,MATCH(INDEX($H$5:$H$16,MATCH(B5,$G$5:$G$16,0)),$J$5:$J$8,0))/100,0)'],
-          hints: ['Two steps: the SKU gives a category (G:H), and the category gives a margin (J:K).', `The inner lookup ${inner} returns the category; search for it in $J$5:$J$8. Pin both tables with $.`, `Shape: =ROUND(D5 * XLOOKUP(${inner}, $J$5:$J$8, $K$5:$K$8) / 100, 0)`],
-          explain: 'The inner XLOOKUP turns the SKU into its category; the outer one finds that category\'s margin. Times the gross, divided by 100 and rounded, that is the line\'s margin in rupiah.',
-          chips: ['D5*', 'B5', '$G$5:$G$16', '$H$5:$H$16', '$J$5:$J$8', '$K$5:$K$8'], fnKey: 'XLOOKUP('
+        const PM = H.table([{ h: 'SKU', k: 'sku' }, { h: 'Product', k: 'name' }, { h: 'Category', k: 'category' }], pl);
+        const MK = H.table([{ h: 'Category', k: 'c' }, { h: 'Margin (%)', k: 'm', num: true }], cats);
+        const catOf = (sku) => H.PRODUCTS.find((x) => x.sku === sku).category;
+        /* The hidden test: finance raises the margin of row 5's category, and row 8 turns out to be a SKU of another
+           category. */
+        const mkAlt = H.edit(MK.cells, { [MK.cell('Margin (%)', cats.findIndex((x) => x.c === catOf(rows[0].sku)))]: (x) => x + 2 });
+        const swap = r.pick(H.PRODUCTS.filter((x) => x.category !== catOf(rows[3].sku)));
+        const alt = H.edit(S.cells, { [S.cell('SKU', 3)]: swap.sku, [S.cell('Gross (Rp)', 3)]: rows[3].cartons * swap.carton_price });
+        const pm = X('master_produk.xlsx', 'Produk', PM), mk = X('margin_kategori.xlsx', 'Margin', MK);
+        const PS = pm.A('SKU'), PC = pm.A('Category'), KC = mk.A('Category'), KM = mk.A('Margin (%)');
+        const inner = `XLOOKUP(B5,${PS},${PC})`;
+        return H.problem({
+          title: 'Line margin through the product master and category margins', file: 'margin_q4.xlsx', sheetName: 'Penjualan', sheet: S, base: S.cells, alt, fill: true, fillCol: 'E', ansLabel: 'Margin (Rp)',
+          books: [wb('master_produk.xlsx', 'Produk', PM), wb('margin_kategori.xlsx', 'Margin', MK, mkAlt)],
+          statement: `<p>${opens([['the sales lines', 'margin_q4.xlsx'], ['the product master', 'master_produk.xlsx'], ['the category margins', 'margin_kategori.xlsx']])} Margins are set per category, not per SKU.</p><p>In <b>E5</b>, work out the margin in rupiah of each line: its <b>Gross (Rp)</b> times the <b>Margin (%)</b> of its SKU's category, divided by 100 and rounded to whole rupiah with ROUND. The SKU's category is in the product master. Fill it down to <b>E${S.last}</b>.</p>`,
+          solution: `=ROUND(D5*XLOOKUP(${inner},${KC},${KM})/100,0)`,
+          alts: [`=ROUND(D5*VLOOKUP(VLOOKUP(B5,${pm.T('SKU', 'Category')},3,FALSE),${mk.T('Category', 'Margin (%)')},2,FALSE)/100,0)`,
+            `=ROUND(D5*INDEX(${KM},MATCH(INDEX(${PC},MATCH(B5,${PS},0)),${KC},0))/100,0)`],
+          hints: ['Two steps in two files: the SKU gives a category (master_produk.xlsx), and the category gives a margin (margin_kategori.xlsx).',
+            `The inner lookup ${inner.replace(/,/g, ', ')} returns the category; search for it in ${KC}.`,
+            `Shape: =ROUND(D5 * XLOOKUP(XLOOKUP(B5, ${PS}, ${PC}), ${KC}, ${KM}) / 100, 0)`],
+          explain: 'The inner XLOOKUP turns the SKU into its category from the product master; the outer one finds that category\'s margin in the margin file. Times the gross, divided by 100 and rounded, that is the line\'s margin in rupiah.',
+          chips: ['D5*', 'B5', PS, PC, KC, KM, pm.T('SKU', 'Category'), mk.T('Category', 'Margin (%)')], fnKey: 'XLOOKUP('
         });
       }
-      const outs = r.sample(H.db().outlets, 14).sort((a, b) => (a.outlet_id < b.outlet_id ? -1 : 1));
-      const dl = r.shuffle(DIST());
-      const map = { Jabodetabek: 'Gudang Bekasi', 'Jawa Barat': 'Gudang Bandung', 'Jawa Tengah': 'Gudang Semarang', 'Jawa Timur': 'Gudang Surabaya', 'Bali Nusra': 'Gudang Surabaya', Sumatera: 'Gudang Medan', Sulawesi: r.pick(['Gudang Surabaya', 'Gudang Semarang']) };
-      const regs = r.shuffle(H.REGIONS).map((g) => ({ g, w: map[g] }));
-      const S = H.table([{ h: 'Outlet ID', k: 'outlet_id' }, { h: 'Outlet', k: 'outlet' }, { h: 'Distributor ID', k: 'distributor_id' }], outs);
-      const M = H.table([{ h: 'ID', k: 'id' }, { h: 'Distributor', k: 'name' }, { h: 'Region', k: 'region' }], dl, { startCol: 4 });
-      const C = H.table([{ h: 'Region', k: 'g' }, { h: 'Warehouse', k: 'w' }], regs, { startCol: 8 });
-      const B = board([S, M, C]);
-      const whOf = (k) => map[DIST().find((d) => d.id === outs[k].distributor_id).region];
-      const i = r.int(1, 13);
-      const j = r.pick(nums(14).filter((k) => whOf(k) !== whOf(i)));
-      const base = Object.assign({}, B.cells, { A1: 'Outlet ID', B1: outs[i].outlet_id, A2: 'Warehouse' });
-      const alt = H.edit(base, { B1: outs[j].outlet_id });
-      return build(B, {
-        title: 'Warehouse serving an outlet, through three lookups', file: 'jalur_distribusi.xlsx', base, alt, answerCell: 'B2',
-        statement: '<p>An outlet buys from a distributor (A:C), the distributor sits in a region (E:G), and each region is served by one warehouse (I:J). In <b>B2</b>, return the <b>Warehouse</b> that serves the outlet in <b>B1</b>, in one formula.</p>',
-        solution: '=XLOOKUP(XLOOKUP(XLOOKUP(B1,A5:A18,C5:C18),E5:E18,G5:G18),I5:I11,J5:J11)',
-        alts: ['=VLOOKUP(VLOOKUP(VLOOKUP(B1,A5:C18,3,FALSE),E5:G18,3,FALSE),I5:J11,2,FALSE)', '=INDEX(J5:J11,MATCH(INDEX(G5:G18,MATCH(INDEX(C5:C18,MATCH(B1,A5:A18,0)),E5:E18,0)),I5:I11,0))'],
-        hints: ['Work outwards: outlet to distributor ID, distributor ID to region, region to warehouse.', 'Build it in steps: XLOOKUP(B1, A5:A18, C5:C18) gives the distributor ID; wrap it in a lookup on E5:E18 that returns G5:G18, the region.', 'Shape: =XLOOKUP(XLOOKUP(XLOOKUP(B1, A5:A18, C5:C18), E5:E18, G5:G18), I5:I11, J5:J11)'],
-        explain: 'The innermost XLOOKUP turns the outlet into its distributor ID, the middle one turns that ID into a region, and the outer one turns the region into its warehouse. Each answer is the value the next lookup searches for.',
-        chips: ['A5:A18', 'C5:C18', 'E5:E18', 'G5:G18', 'I5:I11', 'J5:J11', 'B1'], fnKey: 'XLOOKUP('
+      const outs = r.sample(H.db().outlets, 16).sort((a, b) => (a.outlet_id < b.outlet_id ? -1 : 1));
+      const OL = H.table([{ h: 'Outlet ID', k: 'outlet_id' }, { h: 'Outlet', k: 'outlet' }, { h: 'Distributor ID', k: 'distributor_id' }], outs);
+      const MD = H.table([DC.id, DC.name, DC.region], r.shuffle(DIST()));
+      const rates = r.shuffle(H.REGIONS).map((g) => ({ g, x: r.int(8, 30) * 100 }));
+      const TK = H.table([{ h: 'Region', k: 'g' }, { h: 'Rate (Rp per carton)', k: 'x', num: true }], rates);
+      const rows = H.sales(r, 14).map((s) => ({ date: s.date, o: r.pick(outs).outlet_id, cartons: r.int(2, 30) }));
+      const S = H.table([{ h: 'Date', k: 'date', date: true }, { h: 'Outlet ID', k: 'o' }, { h: 'Cartons', k: 'cartons', num: true }], rows);
+      const regOfOutlet = (id) => DIST().find((d) => d.id === outs.find((o) => o.outlet_id === id).distributor_id).region;
+      /* The hidden test: the rate card raises row 5's region, and the outlet list moves row 7's outlet to a distributor
+         in another region. */
+      const tkAlt = H.edit(TK.cells, { [TK.cell('Rate (Rp per carton)', rates.findIndex((x) => x.g === regOfOutlet(rows[0].o)))]: (x) => x + 300 });
+      const nd = r.pick(DIST().filter((d) => d.region !== regOfOutlet(rows[2].o)));
+      const olAlt = H.edit(OL.cells, { [OL.cell('Distributor ID', outs.findIndex((o) => o.outlet_id === rows[2].o))]: nd.id });
+      const ol = X('daftar_outlet.xlsx', 'Outlet', OL), md = X('master_distributor.xlsx', 'Distributor', MD), tk = X('tarif_kirim.xlsx', 'Tarif', TK);
+      const OI = ol.A('Outlet ID'), OD = ol.A('Distributor ID'), MI = md.A('ID'), MR = md.A('Region'), TR = tk.A('Region'), TV = tk.A('Rate (Rp per carton)');
+      const did = `XLOOKUP(B5,${OI},${OD})`, reg = `XLOOKUP(${did},${MI},${MR})`;
+      return H.problem({
+        title: 'Delivery cost per outlet order, through three other workbooks', file: 'pesanan_outlet.xlsx', sheetName: 'Pesanan', sheet: S, base: S.cells, alt: S.cells, fill: true, fillCol: 'D', ansLabel: 'Delivery (Rp)',
+        books: [wb('daftar_outlet.xlsx', 'Outlet', OL, olAlt), wb('master_distributor.xlsx', 'Distributor', MD), wb('tarif_kirim.xlsx', 'Tarif', TK, tkAlt)],
+        statement: `<p>${opens([['the outlet orders', 'pesanan_outlet.xlsx'], ['the outlet list', 'daftar_outlet.xlsx'], ['the distributor master', 'master_distributor.xlsx'], ['the delivery rate card', 'tarif_kirim.xlsx']])} An outlet buys from a distributor (outlet list), the distributor sits in a region (master), and delivery is priced per carton by region (rate card).</p><p>In <b>D5</b>, work out the delivery cost of each order: its <b>Cartons</b> times the <b>Rate (Rp per carton)</b> of the region the outlet's distributor sits in. Fill it down to <b>D${S.last}</b>.</p>`,
+        solution: `=C5*XLOOKUP(${reg},${TR},${TV})`,
+        alts: [`=C5*VLOOKUP(VLOOKUP(VLOOKUP(B5,${ol.T('Outlet ID', 'Distributor ID')},3,FALSE),${md.T('ID', 'Region')},3,FALSE),${tk.T('Region', 'Rate (Rp per carton)')},2,FALSE)`,
+          `=C5*INDEX(${TV},MATCH(INDEX(${MR},MATCH(INDEX(${OD},MATCH(B5,${OI},0)),${MI},0)),${TR},0))`, `=XLOOKUP(${reg},${TR},${TV})*C5`],
+        hints: ['Work outwards, one workbook at a time: outlet to distributor ID (daftar_outlet.xlsx), distributor ID to region (master_distributor.xlsx), region to rate (tarif_kirim.xlsx).',
+          `Build it in steps: ${did.replace(/,/g, ', ')} gives the distributor ID; wrap it in a lookup on ${MI} that returns ${MR}, the region.`,
+          `Shape: =C5 * XLOOKUP(XLOOKUP(XLOOKUP(B5, ${OI}, ${OD}), ${MI}, ${MR}), ${TR}, ${TV})`],
+        explain: 'The innermost XLOOKUP turns the outlet into its distributor ID, the middle one turns that ID into a region, and the outer one turns the region into its delivery rate. Each answer is the value the next lookup searches for, in the next workbook. Times the cartons, that is the delivery cost.',
+        chips: ['C5*', 'B5', OI, OD, MI, MR, TR, TV, ol.T('Outlet ID', 'Distributor ID'), md.T('ID', 'Region'), tk.T('Region', 'Rate (Rp per carton)')], fnKey: 'XLOOKUP('
       });
     }
   });

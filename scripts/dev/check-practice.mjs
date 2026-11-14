@@ -20,6 +20,8 @@ const P = require(path.join(DIR, 'core.js'));
 const only = process.argv.slice(2).find((a) => a.endsWith('.js'));
 const show = process.argv.includes('--show');
 const loaded = [];
+/* A path outside the list (a model or a draft) is loaded on its own, without quotas. */
+if (only && !P.FILES.some((f) => f.file === only)) { require(path.resolve(only)); for (const t of P.TEMPLATES) t.__file = only; }
 for (const f of P.FILES) {
   if (only && f.file !== only) continue;
   const fp = path.join(DIR, f.file);
@@ -75,9 +77,18 @@ for (const meta of L) {
   for (const a of m.alts || []) { const r = J(a); ok(r.state === 'pass', name + ' alternative is Accepted: ' + a, r); }
   const ty = J(String(solved)); ok(ty.state === 'wrong' && ty.code === 'typed', name + ' a typed answer is refused', ty);
   if (!m.fill && !m.spill) { const fr = J(typeof solved === 'number' ? '=' + solved : '="' + solved + '"'); ok(fr.code === 'frozen', name + ' a frozen answer is refused', fr); }
-  /* the same problem every time */
+  /* the same problem every time, other workbooks included */
   const again = t.make(P.H.rng(meta.key), meta.v, P.H);
-  ok(JSON.stringify(again.variantCells || again.cells) === JSON.stringify(m.variantCells) && again.solution === m.solution, name + ' builds the same every time');
+  const ser = (vc) => JSON.stringify(['base', 'alt'].map((v) => [vc[v], vc[v][P.H.MAIN] || '', (vc[v][P.H.SHEETS] || []).map((x) => [x.name, x.cells])]));
+  ok(ser(again.variantCells) === ser(m.variantCells) && again.solution === m.solution, name + ' builds the same every time');
+  /* several workbooks: every open sheet exists, file names survive filling down, and multi problems really reach out */
+  if (m.books) {
+    const eng = new Set((m.variantCells.base[P.H.SHEETS] || []).map((x) => x.name));
+    for (const b of m.books.slice(1)) for (const sh of b.sheets) ok(eng.has(b.file + '|' + sh.name), name + ' opens ' + b.file + ' ' + sh.name);
+    ok(m.books.every((b, i) => i === 0 || /^[a-z0-9_]+\.xlsx$/.test(b.file)), name + ' workbook files are lowercase .xlsx names', m.books.map((b) => b.file));
+    if (m.fill) { const shifted = Check.shiftRows(m.solution, 3); for (const b of m.books) for (const sh of b.sheets) if (sh.prefix) ok(shifted.split(sh.prefix).length === m.solution.split(sh.prefix).length, name + ' filling down keeps ' + sh.prefix); }
+  }
+  if (t.multi) ok(m.books && m.books.length >= 2 && /\[[a-z0-9_]+\.xlsx\]/.test(m.solution), name + ' reaches into another workbook', m.solution);
   if (show) console.log(meta.id, meta.difficulty, '|', m.title, '|', m.solution, '\n    visible:', String(solved).slice(0, 120), '\n    hidden: ', String(hidden).slice(0, 120));
 }
 /* quotas per file and in all */
@@ -85,6 +96,7 @@ for (const f of loaded) {
   const got = { Easy: 0, Medium: 0, Hard: 0 };
   for (const meta of L) if (P.TEMPLATES.find((x) => x.key === meta.tkey).__file === f.file) got[meta.difficulty]++;
   for (const d of ['Easy', 'Medium', 'Hard']) ok((f.quota[d] || 0) === got[d], `${f.file} has ${f.quota[d] || 0} ${d} problems`, got);
+  if (f.multi) { const multi = L.filter((meta) => { const t = P.TEMPLATES.find((x) => x.key === meta.tkey); return t.__file === f.file && t.multi; }).length; ok(multi >= f.multi, `${f.file} has at least ${f.multi} problems across workbooks`, multi); }
 }
 if (!only) ok(L.length === 500 && loaded.length === P.FILES.length, 'there are 500 problems from all nine files', [L.length, loaded.length]);
 /* The list page's title index must match the problems (run scripts/dev/practice-index.mjs after changes). */
